@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+
+		<Version>1.0.0</Version>
+	</PropertyGroup>
+	<ItemGroup>
+		<InternalsVisibleTo Include="Lateral.CMS.UnitTests" />
+	</ItemGroup>
+	<ItemGroup>
+		<PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />
+		<!-- 12.5.0 is the last Apache-2.0 release of MediatR; 13+ requires a commercial license key. -->
+		<PackageReference Include="MediatR" Version="12.5.0" />
+		<PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.10" />
+		<PackageReference Include="NuvTools.Data.EntityFrameworkCore" Version="10.1.10" />
+	</ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\Lateral.CMS.Domain\Lateral.CMS.Domain.csproj" />
+	</ItemGroup>
+</Project>

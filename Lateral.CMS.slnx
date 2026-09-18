@@ -1,0 +1,17 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".editorconfig" />
+    <File Path="README.md" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Lateral.CMS.API/Lateral.CMS.API.csproj" />
+    <Project Path="src/Lateral.CMS.Application/Lateral.CMS.Application.csproj" />
+    <Project Path="src/Lateral.CMS.Domain/Lateral.CMS.Domain.csproj" />
+    <Project Path="src/Lateral.CMS.Infrastructure.Data.SqlServer/Lateral.CMS.Infrastructure.Data.SqlServer.csproj" />
+    <Project Path="src/Lateral.CMS.Infrastructure.IoC/Lateral.CMS.Infrastructure.IoC.csproj" />
+    <Project Path="src/Lateral.CMS.Infrastructure/Lateral.CMS.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Lateral.CMS.UnitTests/Lateral.CMS.UnitTests.csproj" />
+  </Folder>
+</Solution>

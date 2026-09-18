@@ -1,0 +1,11 @@
+Run from the solution folder. The design-time factory reads the connection string from this project's appsettings.json.
+
+dotnet ef migrations add <<NAME>> --project "src/Lateral.CMS.Infrastructure.Data.SqlServer" --context CmsDbContext
+dotnet ef database update --project "src/Lateral.CMS.Infrastructure.Data.SqlServer" --context CmsDbContext
+dotnet ef migrations remove --project "src/Lateral.CMS.Infrastructure.Data.SqlServer" --context CmsDbContext
+
+Generate the SQL script (e.g. for a DBA review):
+dotnet ef migrations script --idempotent --project "src/Lateral.CMS.Infrastructure.Data.SqlServer" --context CmsDbContext
+
+Update the EF tool:
+dotnet tool update --global dotnet-ef
