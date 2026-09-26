@@ -4,6 +4,9 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 
+		<!-- The XML comments of the types exposed by the API become descriptions in the OpenAPI document. -->
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+
 		<Version>1.0.0</Version>
 	</PropertyGroup>
 	<ItemGroup>

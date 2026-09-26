@@ -28,7 +28,7 @@ public class CmsEntitiesController(ISender sender) : ApiControllerBase
     /// <summary>Lists the entities visible to the caller.</summary>
     /// <remarks>The <c>status</c> and <c>isDisabledByAdmin</c> filters only apply to administrators.</remarks>
     [HttpGet]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType<PagingWithEnumerableList<CmsEntityDTO>>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -40,7 +40,7 @@ public class CmsEntitiesController(ISender sender) : ApiControllerBase
     /// <summary>Returns one entity by the identifier the CMS assigned to it.</summary>
     /// <response code="404">The entity does not exist, or is not visible to the caller.</response>
     [HttpGet("{id}", Name = nameof(GetById))]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType<CmsEntityDTO>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

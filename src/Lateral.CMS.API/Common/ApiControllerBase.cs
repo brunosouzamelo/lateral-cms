@@ -53,4 +53,17 @@ public abstract class ApiControllerBase : ControllerBase
     }
 }
 
+/// <summary>
+/// One reason a request failed. Every error answer is a problem details document whose <c>errors</c>
+/// extension is a list of these, so a caller can react to more than the status code — and to every
+/// problem at once, rather than resubmitting to discover the next one.
+/// </summary>
+/// <param name="Code">
+/// Stable, machine-readable identifier of the problem, such as <c>concurrency.conflict</c>. Safe to
+/// branch on; <paramref name="Message"/> is not.
+/// </param>
+/// <param name="Message">What went wrong, in words, for a human reading the response or a log.</param>
+/// <param name="Detail">
+/// The specifics when there are any — which field, which value — and null when the message says it all.
+/// </param>
 public sealed record ApiError(string? Code, string Message, string? Detail);

@@ -57,7 +57,8 @@ public static class CmsApiClientExtensions
 
         var body = await response.Content.ReadAsStringAsync();
 
-        Assert.True(response.IsSuccessStatusCode, $"Expected a successful response but got {(int)response.StatusCode}: {body}");
+        Assert.That(response.IsSuccessStatusCode, Is.True,
+            $"Expected a successful response but got {(int)response.StatusCode}: {body}");
 
         return JsonDocument.Parse(body).RootElement.Clone();
     }

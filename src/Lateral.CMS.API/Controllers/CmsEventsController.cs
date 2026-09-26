@@ -31,7 +31,9 @@ public class CmsEventsController(ISender sender) : ApiControllerBase
     /// <response code="400">The batch itself is not usable (empty, too large or malformed JSON).</response>
     [HttpPost]
     [Authorize(Policy = Policies.CmsIngestion)]
-    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    // The type is spelled out: for a status the action's return type does not imply, the attribute alone
+    // would declare the response as having no body, and the receipt would be missing from the document.
+    [ProducesResponseType<CmsEventBatchReceiptDTO>(StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -46,7 +48,7 @@ public class CmsEventsController(ISender sender) : ApiControllerBase
     /// <remarks>Administrators only: it exposes the identifiers of entities a consumer may not be allowed to see.</remarks>
     [HttpGet]
     [Authorize(Policy = Policies.ContentAdministrator)]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType<PagingWithEnumerableList<CmsEventDTO>>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]

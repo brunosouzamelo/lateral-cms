@@ -11,87 +11,111 @@ namespace Lateral.CMS.UnitTests.Ingestion;
 /// The event rules, which are the part of the service that has to be right: what each event type does to the
 /// stored state, and what happens when events arrive twice, late or out of order.
 /// </summary>
-public class CmsEventApplierTests : IDisposable
+[TestFixture]
+public class CmsEventApplierTests
 {
     private const string EntityId = "entity-1";
 
-    private readonly CmsTestDatabase _database = new();
-    private readonly FakeDateTimeService _clock = new();
-    private readonly CmsEventApplier _applier;
+    private CmsTestDatabase _database = null!;
+    private CmsEventApplier _applier = null!;
 
-    public CmsEventApplierTests() => _applier = new CmsEventApplier(_database.Context, _clock);
+    [SetUp]
+    public void SetUp()
+    {
+        // A database of its own per test: NUnit reuses the fixture instance, so nothing may carry over.
+        _database = new CmsTestDatabase();
+        _applier = new CmsEventApplier(_database.Context, new FakeDateTimeService());
+    }
+
+    [TearDown]
+    public void TearDown() => _database.Dispose();
 
     // ---------------------------------------------------------------- publish
 
-    [Fact]
+    [Test]
     public async Task Publish_CreatesTheEntity_WhenItIsNotStored()
     {
         var outcome = await ApplyAsync(TestCmsEvents.Publish(EntityId, version: 1, TestCmsEvents.At(0)));
-
-        Assert.Equal(CmsEventStatus.Applied, outcome.Status);
-
         var entity = await FindEntityAsync();
-        Assert.NotNull(entity);
-        Assert.Equal(1, entity.Version);
-        Assert.Equal(1, entity.LastPublishedVersion);
-        Assert.Equal(CmsEntityStatus.Published, entity.CmsEntityStatusId);
-        Assert.Equal(TestCmsEvents.At(0), entity.LastEventTimestamp);
+
+        Assert.That(outcome.Status, Is.EqualTo(CmsEventStatus.Applied));
+        Assert.That(entity, Is.Not.Null);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(entity!.Version, Is.EqualTo(1));
+            Assert.That(entity.LastPublishedVersion, Is.EqualTo(1));
+            Assert.That(entity.CmsEntityStatusId, Is.EqualTo(CmsEntityStatus.Published));
+            Assert.That(entity.LastEventTimestamp, Is.EqualTo(TestCmsEvents.At(0)));
+        });
     }
 
-    [Fact]
+    [Test]
     public async Task Publish_ReplacesTheData_WhenTheVersionIsNewer()
     {
         await ApplyAsync(TestCmsEvents.Publish(EntityId, version: 1, TestCmsEvents.At(0)));
+
         var outcome = await ApplyAsync(TestCmsEvents.Publish(EntityId, version: 2, TestCmsEvents.At(1), """{"title":"second"}"""));
-
-        Assert.Equal(CmsEventStatus.Applied, outcome.Status);
-
         var entity = await FindEntityAsync();
-        Assert.Equal(2, entity!.Version);
-        Assert.Equal(2, entity.LastPublishedVersion);
-        Assert.Equal("""{"title":"second"}""", entity.Payload);
+
+        Assert.That(outcome.Status, Is.EqualTo(CmsEventStatus.Applied));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(entity!.Version, Is.EqualTo(2));
+            Assert.That(entity.LastPublishedVersion, Is.EqualTo(2));
+            Assert.That(entity.Payload, Is.EqualTo("""{"title":"second"}"""));
+        });
     }
 
-    [Fact]
+    [Test]
     public async Task Publish_IsIgnored_WhenTheVersionIsOlderThanTheStoredOne()
     {
         await ApplyAsync(TestCmsEvents.Publish(EntityId, version: 3, TestCmsEvents.At(2), """{"title":"third"}"""));
 
         // Out-of-order delivery: an older revision arrives after a newer one.
         var outcome = await ApplyAsync(TestCmsEvents.Publish(EntityId, version: 2, TestCmsEvents.At(1), """{"title":"second"}"""));
-
-        Assert.Equal(CmsEventStatus.Ignored, outcome.Status);
-
         var entity = await FindEntityAsync();
-        Assert.Equal(3, entity!.Version);
-        Assert.Equal("""{"title":"third"}""", entity.Payload);
+
+        Assert.That(outcome.Status, Is.EqualTo(CmsEventStatus.Ignored));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(entity!.Version, Is.EqualTo(3));
+            Assert.That(entity.Payload, Is.EqualTo("""{"title":"third"}"""));
+        });
     }
 
-    [Fact]
+    [Test]
     public async Task Publish_IsIgnored_WhenTheSameEventIsDeliveredTwice()
     {
         await ApplyAsync(TestCmsEvents.Publish(EntityId, version: 1, TestCmsEvents.At(0)));
+
         var outcome = await ApplyAsync(TestCmsEvents.Publish(EntityId, version: 1, TestCmsEvents.At(0)));
 
-        Assert.Equal(CmsEventStatus.Ignored, outcome.Status);
-        Assert.Equal(1, await CountEntitiesAsync());
+        Assert.That(outcome.Status, Is.EqualTo(CmsEventStatus.Ignored));
+        Assert.That(await CountEntitiesAsync(), Is.EqualTo(1));
     }
 
     // -------------------------------------------------------------- unPublish
 
-    [Fact]
+    [Test]
     public async Task UnPublish_DisablesTheEntity_ButKeepsItsData()
     {
         await ApplyAsync(TestCmsEvents.Publish(EntityId, version: 1, TestCmsEvents.At(0), """{"title":"kept"}"""));
+
         var outcome = await ApplyAsync(TestCmsEvents.UnPublish(EntityId, version: 1, TestCmsEvents.At(1), """{"title":"kept"}"""));
-
-        Assert.Equal(CmsEventStatus.Applied, outcome.Status);
-
         var entity = await FindEntityAsync();
-        Assert.NotNull(entity);
-        Assert.Equal(CmsEntityStatus.Unpublished, entity.CmsEntityStatusId);
-        Assert.Equal("""{"title":"kept"}""", entity.Payload);
-        Assert.Equal(1, entity.LastPublishedVersion);
+
+        Assert.That(outcome.Status, Is.EqualTo(CmsEventStatus.Applied));
+        Assert.That(entity, Is.Not.Null);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(entity!.CmsEntityStatusId, Is.EqualTo(CmsEntityStatus.Unpublished));
+            Assert.That(entity.Payload, Is.EqualTo("""{"title":"kept"}"""));
+            Assert.That(entity.LastPublishedVersion, Is.EqualTo(1));
+        });
     }
 
     /// <summary>
@@ -99,39 +123,45 @@ public class CmsEventApplierTests : IDisposable
     /// published — so it was never sent — and then X+1 is unpublished. The unPublish event carries the fields
     /// of X+1, so the service must take them: it is the latest version that exists.
     /// </summary>
-    [Fact]
+    [Test]
     public async Task UnPublish_AdvancesTheStoredVersion_WhenTheNewOneWasNeverPublished()
     {
         await ApplyAsync(TestCmsEvents.Publish(EntityId, version: 4, TestCmsEvents.At(0), """{"title":"v4"}"""));
 
         var outcome = await ApplyAsync(TestCmsEvents.UnPublish(EntityId, version: 5, TestCmsEvents.At(1), """{"title":"v5 never published"}"""));
-
-        Assert.Equal(CmsEventStatus.Applied, outcome.Status);
-
         var entity = await FindEntityAsync();
-        Assert.Equal(5, entity!.Version);
-        Assert.Equal("""{"title":"v5 never published"}""", entity.Payload);
-        Assert.Equal(CmsEntityStatus.Unpublished, entity.CmsEntityStatusId);
 
-        // The last version that ever reached the service through a publish is still 4.
-        Assert.Equal(4, entity.LastPublishedVersion);
+        Assert.That(outcome.Status, Is.EqualTo(CmsEventStatus.Applied));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(entity!.Version, Is.EqualTo(5));
+            Assert.That(entity.Payload, Is.EqualTo("""{"title":"v5 never published"}"""));
+            Assert.That(entity.CmsEntityStatusId, Is.EqualTo(CmsEntityStatus.Unpublished));
+
+            // The last version that ever reached the service through a publish is still 4.
+            Assert.That(entity.LastPublishedVersion, Is.EqualTo(4));
+        });
     }
 
-    [Fact]
+    [Test]
     public async Task UnPublish_CreatesTheEntityAlreadyDisabled_WhenNoVersionWasEverStored()
     {
         var outcome = await ApplyAsync(TestCmsEvents.UnPublish(EntityId, version: 7, TestCmsEvents.At(0), """{"title":"v7"}"""));
-
-        Assert.Equal(CmsEventStatus.Applied, outcome.Status);
-
         var entity = await FindEntityAsync();
-        Assert.NotNull(entity);
-        Assert.Equal(7, entity.Version);
-        Assert.Null(entity.LastPublishedVersion);
-        Assert.Equal(CmsEntityStatus.Unpublished, entity.CmsEntityStatusId);
+
+        Assert.That(outcome.Status, Is.EqualTo(CmsEventStatus.Applied));
+        Assert.That(entity, Is.Not.Null);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(entity!.Version, Is.EqualTo(7));
+            Assert.That(entity.LastPublishedVersion, Is.Null);
+            Assert.That(entity.CmsEntityStatusId, Is.EqualTo(CmsEntityStatus.Unpublished));
+        });
     }
 
-    [Fact]
+    [Test]
     public async Task Publish_RepublishesTheSameVersion_WhenItArrivesAfterTheUnPublish()
     {
         await ApplyAsync(TestCmsEvents.Publish(EntityId, version: 4, TestCmsEvents.At(0)));
@@ -139,12 +169,13 @@ public class CmsEventApplierTests : IDisposable
 
         // Same version, later timestamp: the timestamp decides.
         var outcome = await ApplyAsync(TestCmsEvents.Publish(EntityId, version: 4, TestCmsEvents.At(2)));
+        var entity = await FindEntityAsync();
 
-        Assert.Equal(CmsEventStatus.Applied, outcome.Status);
-        Assert.Equal(CmsEntityStatus.Published, (await FindEntityAsync())!.CmsEntityStatusId);
+        Assert.That(outcome.Status, Is.EqualTo(CmsEventStatus.Applied));
+        Assert.That(entity!.CmsEntityStatusId, Is.EqualTo(CmsEntityStatus.Published));
     }
 
-    [Fact]
+    [Test]
     public async Task UnPublish_Wins_WhenItSharesVersionAndTimestampWithAPublish()
     {
         await ApplyAsync(TestCmsEvents.Publish(EntityId, version: 2, TestCmsEvents.At(0)));
@@ -153,48 +184,52 @@ public class CmsEventApplierTests : IDisposable
         // by the order in which two events happen to be delivered.
         var unpublish = await ApplyAsync(TestCmsEvents.UnPublish(EntityId, version: 2, TestCmsEvents.At(0)));
         var republish = await ApplyAsync(TestCmsEvents.Publish(EntityId, version: 2, TestCmsEvents.At(0)));
+        var entity = await FindEntityAsync();
 
-        Assert.Equal(CmsEventStatus.Applied, unpublish.Status);
-        Assert.Equal(CmsEventStatus.Ignored, republish.Status);
-        Assert.Equal(CmsEntityStatus.Unpublished, (await FindEntityAsync())!.CmsEntityStatusId);
+        Assert.Multiple(() =>
+        {
+            Assert.That(unpublish.Status, Is.EqualTo(CmsEventStatus.Applied));
+            Assert.That(republish.Status, Is.EqualTo(CmsEventStatus.Ignored));
+            Assert.That(entity!.CmsEntityStatusId, Is.EqualTo(CmsEntityStatus.Unpublished));
+        });
     }
 
     // ----------------------------------------------------------------- delete
 
-    [Fact]
+    [Test]
     public async Task Delete_RemovesTheEntity_AndRecordsATombstone()
     {
         await ApplyAsync(TestCmsEvents.Publish(EntityId, version: 1, TestCmsEvents.At(0)));
 
         var outcome = await ApplyAsync(TestCmsEvents.Delete(EntityId, TestCmsEvents.At(1)));
-
-        Assert.Equal(CmsEventStatus.Applied, outcome.Status);
-        Assert.Null(await FindEntityAsync());
-
         var tombstone = await FindTombstoneAsync();
-        Assert.NotNull(tombstone);
-        Assert.Equal(TestCmsEvents.At(1), tombstone.DeletedTimestamp);
+
+        Assert.That(outcome.Status, Is.EqualTo(CmsEventStatus.Applied));
+        Assert.That(await FindEntityAsync(), Is.Null);
+        Assert.That(tombstone, Is.Not.Null);
+        Assert.That(tombstone!.DeletedTimestamp, Is.EqualTo(TestCmsEvents.At(1)));
     }
 
-    [Fact]
+    [Test]
     public async Task Delete_RecordsATombstone_WhenTheEntityWasNeverStored()
     {
         var outcome = await ApplyAsync(TestCmsEvents.Delete(EntityId, TestCmsEvents.At(1)));
 
-        Assert.Equal(CmsEventStatus.Applied, outcome.Status);
-        Assert.NotNull(await FindTombstoneAsync());
+        Assert.That(outcome.Status, Is.EqualTo(CmsEventStatus.Applied));
+        Assert.That(await FindTombstoneAsync(), Is.Not.Null);
     }
 
-    [Fact]
+    [Test]
     public async Task Delete_IsIgnored_WhenTheEntityIsAlreadyDeleted()
     {
         await ApplyAsync(TestCmsEvents.Delete(EntityId, TestCmsEvents.At(1)));
+
         var outcome = await ApplyAsync(TestCmsEvents.Delete(EntityId, TestCmsEvents.At(1)));
 
-        Assert.Equal(CmsEventStatus.Ignored, outcome.Status);
+        Assert.That(outcome.Status, Is.EqualTo(CmsEventStatus.Ignored));
     }
 
-    [Fact]
+    [Test]
     public async Task Publish_IsIgnored_WhenItPredatesTheDeletion()
     {
         await ApplyAsync(TestCmsEvents.Delete(EntityId, TestCmsEvents.At(5)));
@@ -202,11 +237,11 @@ public class CmsEventApplierTests : IDisposable
         // A publish that was in flight when the delete was processed must not resurrect the entity.
         var outcome = await ApplyAsync(TestCmsEvents.Publish(EntityId, version: 9, TestCmsEvents.At(4)));
 
-        Assert.Equal(CmsEventStatus.Ignored, outcome.Status);
-        Assert.Null(await FindEntityAsync());
+        Assert.That(outcome.Status, Is.EqualTo(CmsEventStatus.Ignored));
+        Assert.That(await FindEntityAsync(), Is.Null);
     }
 
-    [Fact]
+    [Test]
     public async Task Publish_RecreatesTheEntity_WhenItIsLaterThanTheDeletion()
     {
         await ApplyAsync(TestCmsEvents.Delete(EntityId, TestCmsEvents.At(5)));
@@ -214,45 +249,49 @@ public class CmsEventApplierTests : IDisposable
         // A genuine re-creation in the CMS reuses the identifier; it is later, so it is accepted.
         var outcome = await ApplyAsync(TestCmsEvents.Publish(EntityId, version: 1, TestCmsEvents.At(6)));
 
-        Assert.Equal(CmsEventStatus.Applied, outcome.Status);
-        Assert.NotNull(await FindEntityAsync());
+        Assert.That(outcome.Status, Is.EqualTo(CmsEventStatus.Applied));
+        Assert.That(await FindEntityAsync(), Is.Not.Null);
     }
 
-    [Fact]
+    [Test]
     public async Task Delete_IsIgnored_ButStillRecordsTheTombstone_WhenTheEntityChangedAfterIt()
     {
         await ApplyAsync(TestCmsEvents.Publish(EntityId, version: 2, TestCmsEvents.At(5)));
 
         // A delete that predates the stored state: dropping the entity would lose a newer change.
         var outcome = await ApplyAsync(TestCmsEvents.Delete(EntityId, TestCmsEvents.At(3)));
+        var tombstone = await FindTombstoneAsync();
 
-        Assert.Equal(CmsEventStatus.Ignored, outcome.Status);
-        Assert.NotNull(await FindEntityAsync());
+        Assert.That(outcome.Status, Is.EqualTo(CmsEventStatus.Ignored));
+        Assert.That(await FindEntityAsync(), Is.Not.Null);
 
         // Recorded anyway, so events older than the deletion are still discarded.
-        Assert.Equal(TestCmsEvents.At(3), (await FindTombstoneAsync())!.DeletedTimestamp);
+        Assert.That(tombstone!.DeletedTimestamp, Is.EqualTo(TestCmsEvents.At(3)));
     }
 
-    [Fact]
+    [Test]
     public async Task Delete_KeepsTheLatestDeletionTimestamp_WhenAnOlderDeleteArrivesAfterwards()
     {
         await ApplyAsync(TestCmsEvents.Delete(EntityId, TestCmsEvents.At(5)));
         await ApplyAsync(TestCmsEvents.Delete(EntityId, TestCmsEvents.At(2)));
 
-        Assert.Equal(TestCmsEvents.At(5), (await FindTombstoneAsync())!.DeletedTimestamp);
+        var tombstone = await FindTombstoneAsync();
+
+        Assert.That(tombstone!.DeletedTimestamp, Is.EqualTo(TestCmsEvents.At(5)));
     }
 
     // ------------------------------------------------------------ consistency
 
-    [Fact]
-    public async Task ApplyAsync_Throws_WhenTheEventIsIncomplete()
+    [Test]
+    public void ApplyAsync_Throws_WhenTheEventIsIncomplete()
     {
         var incomplete = TestCmsEvents.Publish(EntityId, version: 1, TestCmsEvents.At(0));
         incomplete.EventTimestamp = null;
 
         // Such an event is rejected at the webhook and never reaches the applier; if one ever did, the
         // processor must record a failure instead of writing a half-known state.
-        await Assert.ThrowsAsync<InvalidOperationException>(() => _applier.ApplyAsync(incomplete, CancellationToken.None));
+        Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await _applier.ApplyAsync(incomplete, CancellationToken.None));
     }
 
     // ---------------------------------------------------------------- helpers
@@ -281,11 +320,5 @@ public class CmsEventApplierTests : IDisposable
     {
         using var context = _database.CreateContext();
         return await context.CmsEntity.CountAsync();
-    }
-
-    public void Dispose()
-    {
-        _database.Dispose();
-        GC.SuppressFinalize(this);
     }
 }

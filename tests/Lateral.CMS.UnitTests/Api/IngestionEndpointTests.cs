@@ -10,34 +10,47 @@ namespace Lateral.CMS.UnitTests.Api;
 /// The webhook as the CMS sees it: what it accepts, what it reports back, and what the service holds
 /// once the batch has been processed.
 /// </summary>
-public class IngestionEndpointTests(CmsApiFactory factory) : IClassFixture<CmsApiFactory>
+[TestFixture]
+public class IngestionEndpointTests
 {
     private static readonly DateTimeOffset Timestamp = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
-    [Fact]
+    private CmsApiFactory _factory = null!;
+
+    [OneTimeSetUp]
+    public void OneTimeSetUp() => _factory = new CmsApiFactory();
+
+    [OneTimeTearDown]
+    public void OneTimeTearDown() => _factory.Dispose();
+
+    [Test]
     public async Task Receive_AcknowledgesTheBatch_BeforeProcessingIt()
     {
         var id = NextEntityId();
 
-        var response = await factory.AsOrganization().PostEventsAsync(PublishEvent(id, 1, Timestamp));
+        var response = await _factory.AsOrganization().PostEventsAsync(PublishEvent(id, 1, Timestamp));
 
         // 202, not 200: the batch is stored and applied afterwards, so the CMS is not kept waiting.
-        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
 
         var receipt = await response.ReadJsonAsync();
-        Assert.Equal(1, receipt.GetProperty("received").GetInt32());
-        Assert.Equal(1, receipt.GetProperty("accepted").GetInt32());
-        Assert.Equal(0, receipt.GetProperty("rejected").GetInt32());
-        Assert.NotEqual(Guid.Empty, receipt.GetProperty("batchId").GetGuid());
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(receipt.GetProperty("received").GetInt32(), Is.EqualTo(1));
+            Assert.That(receipt.GetProperty("accepted").GetInt32(), Is.EqualTo(1));
+            Assert.That(receipt.GetProperty("rejected").GetInt32(), Is.EqualTo(0));
+            Assert.That(receipt.GetProperty("batchId").GetGuid(), Is.Not.EqualTo(Guid.Empty));
+        });
     }
 
-    [Fact]
+    [Test]
     public async Task Receive_AcceptsTheValidEvents_AndReportsOnlyTheRejectedOnes()
     {
         var good = NextEntityId();
         var alsoGood = NextEntityId();
 
-        var response = await factory.AsOrganization().PostEventsAsync(
+        var response = await _factory.AsOrganization().PostEventsAsync(
             PublishEvent(good, 1, Timestamp),
             new { type = "publish", id = "no-version", payload = new { title = "x" }, timestamp = Timestamp },
             DeleteEvent(alsoGood, Timestamp));
@@ -45,167 +58,195 @@ public class IngestionEndpointTests(CmsApiFactory factory) : IClassFixture<CmsAp
         var receipt = await response.ReadJsonAsync();
 
         // One bad event does not cost the CMS the whole delivery.
-        Assert.Equal(3, receipt.GetProperty("received").GetInt32());
-        Assert.Equal(2, receipt.GetProperty("accepted").GetInt32());
+        Assert.Multiple(() =>
+        {
+            Assert.That(receipt.GetProperty("received").GetInt32(), Is.EqualTo(3));
+            Assert.That(receipt.GetProperty("accepted").GetInt32(), Is.EqualTo(2));
+        });
 
-        var rejection = Assert.Single(receipt.GetProperty("rejections").EnumerateArray());
-        Assert.Equal(1, rejection.GetProperty("index").GetInt32());
-        Assert.Equal("no-version", rejection.GetProperty("id").GetString());
-        Assert.Contains(rejection.GetProperty("errors").EnumerateArray(), error => error.GetString()!.Contains("'version'"));
+        var rejections = receipt.GetProperty("rejections").EnumerateArray().ToList();
+        Assert.That(rejections, Has.Count.EqualTo(1));
+
+        var errors = string.Join(" | ", rejections[0].GetProperty("errors").EnumerateArray().Select(e => e.GetString()));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(rejections[0].GetProperty("index").GetInt32(), Is.EqualTo(1));
+            Assert.That(rejections[0].GetProperty("id").GetString(), Is.EqualTo("no-version"));
+            Assert.That(errors, Does.Contain("'version'"));
+        });
     }
 
-    [Fact]
+    [Test]
     public async Task Receive_RejectsAnEmptyBatch()
     {
-        var response = await factory.AsOrganization().PostEventsAsync();
+        var response = await _factory.AsOrganization().PostEventsAsync();
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
     }
 
-    [Fact]
+    [Test]
     public async Task Receive_RejectsAPayloadThatIsNotAnObject()
     {
-        var response = await factory.AsOrganization().PostEventsAsync(
+        var response = await _factory.AsOrganization().PostEventsAsync(
             new { type = "publish", id = NextEntityId(), version = 1, payload = "not an object", timestamp = Timestamp });
 
         var receipt = await response.ReadJsonAsync();
 
-        Assert.Equal(0, receipt.GetProperty("accepted").GetInt32());
+        Assert.That(receipt.GetProperty("accepted").GetInt32(), Is.EqualTo(0));
     }
 
-    [Fact]
+    [Test]
     public async Task Receive_RejectsMalformedJson_WithProblemDetails()
     {
-        var client = factory.AsOrganization();
+        var client = _factory.AsOrganization();
         var content = new StringContent("[ { \"type\": ", Encoding.UTF8, "application/json");
 
         var response = await client.PostAsync("/cms/events", content);
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
     }
 
-    [Fact]
+    [Test]
     public async Task ProcessedBatch_MakesTheEntityAvailableToConsumers()
     {
         var id = NextEntityId();
 
-        await factory.AsOrganization().PostEventsAsync(
+        await _factory.AsOrganization().PostEventsAsync(
             PublishEvent(id, 1, Timestamp, new { title = "First", tags = new[] { "a", "b" } }));
 
-        await factory.ProcessEventsAsync();
+        await _factory.ProcessEventsAsync();
 
-        var entity = await (await factory.AsConsumer().GetAsync($"/api/v1/entities/{id}")).ReadJsonAsync();
+        var entity = await (await _factory.AsConsumer().GetAsync($"/api/v1/entities/{id}")).ReadJsonAsync();
 
-        Assert.Equal(id, entity.GetProperty("id").GetString());
-        Assert.Equal(1, entity.GetProperty("version").GetInt32());
-        Assert.Equal("Published", entity.GetProperty("status").GetString());
+        Assert.Multiple(() =>
+        {
+            Assert.That(entity.GetProperty("id").GetString(), Is.EqualTo(id));
+            Assert.That(entity.GetProperty("version").GetInt32(), Is.EqualTo(1));
+            Assert.That(entity.GetProperty("status").GetString(), Is.EqualTo("Published"));
 
-        // The payload is returned as JSON, not as an escaped string.
-        Assert.Equal(JsonValueKind.Object, entity.GetProperty("payload").ValueKind);
-        Assert.Equal("First", entity.GetProperty("payload").GetProperty("title").GetString());
+            // The payload is returned as JSON, not as an escaped string.
+            Assert.That(entity.GetProperty("payload").ValueKind, Is.EqualTo(JsonValueKind.Object));
+            Assert.That(entity.GetProperty("payload").GetProperty("title").GetString(), Is.EqualTo("First"));
+        });
     }
 
-    [Fact]
+    [Test]
     public async Task ProcessedBatch_AppliesTheEventsInTheOrderTheCmsRecordedThem()
     {
         var id = NextEntityId();
 
         // Delivered newest first: the stored state must still end up at version 3.
-        await factory.AsOrganization().PostEventsAsync(
+        await _factory.AsOrganization().PostEventsAsync(
             PublishEvent(id, 3, Timestamp.AddMinutes(2), new { title = "third" }),
             PublishEvent(id, 1, Timestamp, new { title = "first" }),
             PublishEvent(id, 2, Timestamp.AddMinutes(1), new { title = "second" }));
 
-        await factory.ProcessEventsAsync();
+        await _factory.ProcessEventsAsync();
 
-        var entity = await (await factory.AsConsumer().GetAsync($"/api/v1/entities/{id}")).ReadJsonAsync();
+        var entity = await (await _factory.AsConsumer().GetAsync($"/api/v1/entities/{id}")).ReadJsonAsync();
 
-        Assert.Equal(3, entity.GetProperty("version").GetInt32());
-        Assert.Equal("third", entity.GetProperty("payload").GetProperty("title").GetString());
+        Assert.Multiple(() =>
+        {
+            Assert.That(entity.GetProperty("version").GetInt32(), Is.EqualTo(3));
+            Assert.That(entity.GetProperty("payload").GetProperty("title").GetString(), Is.EqualTo("third"));
+        });
     }
 
-    [Fact]
+    [Test]
     public async Task ProcessedBatch_ChangesNothing_WhenTheSameBatchIsDeliveredTwice()
     {
         var id = NextEntityId();
         var batch = new[] { PublishEvent(id, 1, Timestamp, new { title = "only" }) };
 
-        await factory.AsOrganization().PostEventsAsync(batch);
-        await factory.ProcessEventsAsync();
+        await _factory.AsOrganization().PostEventsAsync(batch);
+        await _factory.ProcessEventsAsync();
 
         // A webhook retry after a timeout: delivery is at-least-once, so applying has to be idempotent.
-        await factory.AsOrganization().PostEventsAsync(batch);
-        await factory.ProcessEventsAsync();
+        await _factory.AsOrganization().PostEventsAsync(batch);
+        await _factory.ProcessEventsAsync();
 
-        var entity = await (await factory.AsConsumer().GetAsync($"/api/v1/entities/{id}")).ReadJsonAsync();
-        Assert.Equal(1, entity.GetProperty("version").GetInt32());
+        var entity = await (await _factory.AsConsumer().GetAsync($"/api/v1/entities/{id}")).ReadJsonAsync();
+        Assert.That(entity.GetProperty("version").GetInt32(), Is.EqualTo(1));
 
-        var events = await (await factory.AsAdmin().GetAsync($"/cms/events?externalId={id}")).ReadJsonAsync();
+        var events = await (await _factory.AsAdmin().GetAsync($"/cms/events?externalId={id}")).ReadJsonAsync();
         var statuses = events.GetProperty("list").EnumerateArray().Select(e => e.GetProperty("status").GetString()).ToList();
 
-        Assert.Equal(2, statuses.Count);
-        Assert.Contains("Applied", statuses);
-        Assert.Contains("Ignored", statuses);
+        Assert.That(statuses, Has.Count.EqualTo(2));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(statuses, Does.Contain("Applied"));
+            Assert.That(statuses, Does.Contain("Ignored"));
+        });
     }
 
-    [Fact]
+    [Test]
     public async Task ProcessedDelete_RemovesTheEntity_WhileUnPublishKeepsIt()
     {
         var deleted = NextEntityId();
         var unpublished = NextEntityId();
 
-        await factory.AsOrganization().PostEventsAsync(
+        await _factory.AsOrganization().PostEventsAsync(
             PublishEvent(deleted, 1, Timestamp),
             PublishEvent(unpublished, 1, Timestamp));
 
-        await factory.ProcessEventsAsync();
+        await _factory.ProcessEventsAsync();
 
-        await factory.AsOrganization().PostEventsAsync(
+        await _factory.AsOrganization().PostEventsAsync(
             DeleteEvent(deleted, Timestamp.AddMinutes(1)),
             UnPublishEvent(unpublished, 2, Timestamp.AddMinutes(1), new { title = "still here" }));
 
-        await factory.ProcessEventsAsync();
+        await _factory.ProcessEventsAsync();
 
-        var admin = factory.AsAdmin();
+        var admin = _factory.AsAdmin();
 
         // Hard-deleted: gone even for an administrator.
-        Assert.Equal(HttpStatusCode.NotFound, (await admin.GetAsync($"/api/v1/entities/{deleted}")).StatusCode);
+        var deletedResponse = await admin.GetAsync($"/api/v1/entities/{deleted}");
+        Assert.That(deletedResponse.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
 
         // Unpublished: kept in the persistence layer, hidden from consumers.
         var kept = await (await admin.GetAsync($"/api/v1/entities/{unpublished}")).ReadJsonAsync();
-        Assert.Equal("Unpublished", kept.GetProperty("status").GetString());
-        Assert.Equal("still here", kept.GetProperty("payload").GetProperty("title").GetString());
+        var consumerResponse = await _factory.AsConsumer().GetAsync($"/api/v1/entities/{unpublished}");
 
-        Assert.Equal(HttpStatusCode.NotFound, (await factory.AsConsumer().GetAsync($"/api/v1/entities/{unpublished}")).StatusCode);
+        Assert.Multiple(() =>
+        {
+            Assert.That(kept.GetProperty("status").GetString(), Is.EqualTo("Unpublished"));
+            Assert.That(kept.GetProperty("payload").GetProperty("title").GetString(), Is.EqualTo("still here"));
+            Assert.That(consumerResponse.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
+        });
     }
 
-    [Fact]
+    [Test]
     public async Task EventLog_RecordsEveryEvent_IncludingTheRejectedOnes()
     {
         var id = NextEntityId();
 
-        await factory.AsOrganization().PostEventsAsync(
+        await _factory.AsOrganization().PostEventsAsync(
             PublishEvent(id, 1, Timestamp),
             new { type = "publish", id, version = 0, payload = new { title = "x" }, timestamp = Timestamp });
 
-        await factory.ProcessEventsAsync();
+        await _factory.ProcessEventsAsync();
 
-        var events = await (await factory.AsAdmin().GetAsync($"/cms/events?externalId={id}")).ReadJsonAsync();
+        var events = await (await _factory.AsAdmin().GetAsync($"/cms/events?externalId={id}")).ReadJsonAsync();
         var statuses = events.GetProperty("list").EnumerateArray().Select(e => e.GetProperty("status").GetString()).ToList();
 
-        Assert.Contains("Applied", statuses);
-        Assert.Contains("Rejected", statuses);
+        Assert.Multiple(() =>
+        {
+            Assert.That(statuses, Does.Contain("Applied"));
+            Assert.That(statuses, Does.Contain("Rejected"));
+        });
     }
 
-    [Fact]
+    [Test]
     public async Task EventLog_NeverReturnsThePayload()
     {
         var id = NextEntityId();
 
-        await factory.AsOrganization().PostEventsAsync(PublishEvent(id, 1, Timestamp, new { secret = "confidential" }));
+        await _factory.AsOrganization().PostEventsAsync(PublishEvent(id, 1, Timestamp, new { secret = "confidential" }));
 
-        var events = await (await factory.AsAdmin().GetAsync($"/cms/events?externalId={id}")).ReadJsonAsync();
+        var events = await (await _factory.AsAdmin().GetAsync($"/cms/events?externalId={id}")).ReadJsonAsync();
 
-        Assert.DoesNotContain("confidential", events.ToString());
+        Assert.That(events.ToString(), Does.Not.Contain("confidential"));
     }
 }

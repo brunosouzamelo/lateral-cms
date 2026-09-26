@@ -54,13 +54,15 @@ try
 
     builder.Services.AddInfrastructure(builder.Configuration);
 
+    // Enumerations travel as names, so "Unpublished" survives a renumbering and reads in the logs.
     builder.Services
         .AddControllers()
-        .AddJsonOptions(options =>
-        {
-            // Enumerations travel as names, so "Unpublished" survives a renumbering and reads in the logs.
-            options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
-        });
+        .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+
+    // The same converter on the other options set. MVC serializes the responses, but the OpenAPI document
+    // generator reads these — without it the document promises integers while the API answers names.
+    builder.Services.ConfigureHttpJsonOptions(options =>
+        options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
     builder.Services
         .AddApiVersioning(options =>
@@ -170,7 +172,37 @@ try
     if (app.Environment.IsDevelopment())
     {
         app.MapOpenApi().AllowAnonymous();
-        app.MapScalarApiReference(options => options.WithTitle("Lateral CMS API")).AllowAnonymous();
+
+        app.MapScalarApiReference("/docs", options =>
+        {
+            options.WithTitle("Lateral CMS API");
+
+            // Declaring the scheme in the document is not enough: without a preferred scheme Scalar shows
+            // the credential inputs but sends the request unauthenticated, which answers 401 every time.
+            options.AddPreferredSecuritySchemes(BasicAuthenticationDefaults.AuthenticationScheme);
+
+            // Survives a page refresh, so the credentials are entered once per browser.
+            options.EnablePersistentAuthentication();
+
+            // Development only, and only from the configuration this instance is already running with:
+            // the reference opens ready to call the API instead of sending everyone to the README first.
+            var administrator = builder.Configuration
+                .GetSection(BasicAuthenticationOptions.SectionName)
+                .Get<BasicAuthenticationOptions>()?
+                .Users.Find(user => user.Roles.Contains(Roles.Admin));
+
+            if (administrator is not null)
+            {
+                options.AddHttpAuthentication(BasicAuthenticationDefaults.AuthenticationScheme, scheme => scheme
+                    .WithUsername(administrator.UserName)
+                    .WithPassword(administrator.Password));
+            }
+        }).AllowAnonymous();
+
+        // No route serves the root, and the fallback policy answers 401 there — which shows up as the
+        // browser's own Basic prompt that no credential gets past, since there is nothing behind it.
+        // Send anyone who lands there to the reference instead.
+        app.MapGet("/", () => Results.Redirect("/docs")).AllowAnonymous().ExcludeFromDescription();
     }
 
     app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false }).AllowAnonymous();

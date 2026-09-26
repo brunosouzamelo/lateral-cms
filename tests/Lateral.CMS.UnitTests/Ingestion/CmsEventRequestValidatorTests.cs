@@ -8,98 +8,77 @@ using Microsoft.Extensions.Options;
 namespace Lateral.CMS.UnitTests.Ingestion;
 
 /// <summary>The constraints an event has to satisfy before it is accepted into the inbox.</summary>
+[TestFixture]
 public class CmsEventRequestValidatorTests
 {
     private readonly FakeDateTimeService _clock = new();
 
-    [Fact]
+    [Test]
     public void Validate_Accepts_ACompletePublishEvent()
-        => Assert.Empty(Validate(Publish()));
+        => Assert.That(Validate(Publish()), Is.Empty);
 
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("created")]
-    [InlineData("1")]
+    [TestCase(null)]
+    [TestCase("")]
+    [TestCase("created")]
+    [TestCase("1")]
     public void Validate_Rejects_AMissingOrUnsupportedType(string? type)
-    {
-        var errors = Validate(Publish(request => request.Type = type));
+        => Assert.That(Errors(Publish(request => request.Type = type)), Does.Contain("'type'"));
 
-        Assert.Contains(errors, error => error.Contains("'type'"));
-    }
-
-    [Theory]
-    [InlineData("publish")]
-    [InlineData("Publish")]
-    [InlineData("unPublish")]
-    [InlineData("UNPUBLISH")]
-    [InlineData("delete")]
+    [TestCase("publish")]
+    [TestCase("Publish")]
+    [TestCase("unPublish")]
+    [TestCase("UNPUBLISH")]
+    [TestCase("delete")]
     public void Validate_Accepts_TheSupportedTypes_RegardlessOfCase(string type)
-    {
-        var errors = Validate(Publish(request => request.Type = type));
+        => Assert.That(Errors(Publish(request => request.Type = type)), Does.Not.Contain("'type'"));
 
-        Assert.DoesNotContain(errors, error => error.Contains("'type'"));
-    }
-
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("   ")]
-    [InlineData("has space")]
+    [TestCase(null)]
+    [TestCase("")]
+    [TestCase("   ")]
+    [TestCase("has space")]
     public void Validate_Rejects_AMissingOrMalformedId(string? id)
-    {
-        var errors = Validate(Publish(request => request.Id = id));
+        => Assert.That(Errors(Publish(request => request.Id = id)), Does.Contain("'id'"));
 
-        Assert.Contains(errors, error => error.Contains("'id'"));
-    }
-
-    [Fact]
+    [Test]
     public void Validate_Rejects_AnIdOverTheMaximumLength()
     {
-        var errors = Validate(Publish(request => request.Id = new string('x', CmsEventRequestValidator.ExternalIdMaxLength + 1)));
+        var errors = Errors(Publish(request => request.Id = new string('x', CmsEventRequestValidator.ExternalIdMaxLength + 1)));
 
-        Assert.Contains(errors, error => error.Contains("'id'"));
+        Assert.That(errors, Does.Contain("'id'"));
     }
 
-    [Theory]
-    [InlineData("publish")]
-    [InlineData("unPublish")]
+    [TestCase("publish")]
+    [TestCase("unPublish")]
     public void Validate_Rejects_AVersionedEventWithoutAVersion(string type)
     {
-        var errors = Validate(Publish(request =>
+        var errors = Errors(Publish(request =>
         {
             request.Type = type;
             request.Version = null;
         }));
 
-        Assert.Contains(errors, error => error.Contains("'version'"));
+        Assert.That(errors, Does.Contain("'version'"));
     }
 
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-1)]
+    [TestCase(0)]
+    [TestCase(-1)]
     public void Validate_Rejects_AVersionBelowTheFirstOne(int version)
-    {
-        var errors = Validate(Publish(request => request.Version = version));
+        => Assert.That(Errors(Publish(request => request.Version = version)), Does.Contain("'version'"));
 
-        Assert.Contains(errors, error => error.Contains("'version'"));
-    }
-
-    [Theory]
-    [InlineData("publish")]
-    [InlineData("unPublish")]
+    [TestCase("publish")]
+    [TestCase("unPublish")]
     public void Validate_Rejects_AVersionedEventWithoutAPayload(string type)
     {
-        var errors = Validate(Publish(request =>
+        var errors = Errors(Publish(request =>
         {
             request.Type = type;
             request.Payload = null;
         }));
 
-        Assert.Contains(errors, error => error.Contains("'payload'"));
+        Assert.That(errors, Does.Contain("'payload'"));
     }
 
-    [Fact]
+    [Test]
     public void Validate_Accepts_ADeleteWithoutVersionOrPayload()
     {
         var errors = Validate(new CmsEventRequest
@@ -109,32 +88,24 @@ public class CmsEventRequestValidatorTests
             Timestamp = _clock.UtcNowOffset.AddMinutes(-1)
         });
 
-        Assert.Empty(errors);
+        Assert.That(errors, Is.Empty);
     }
 
-    [Fact]
+    [Test]
     public void Validate_Rejects_AMissingTimestamp()
-    {
-        var errors = Validate(Publish(request => request.Timestamp = null));
+        => Assert.That(Errors(Publish(request => request.Timestamp = null)), Does.Contain("'timestamp'"));
 
-        Assert.Contains(errors, error => error.Contains("'timestamp'"));
-    }
-
-    [Fact]
+    [Test]
     public void Validate_Rejects_ATimestampFurtherInTheFutureThanTheAllowedClockSkew()
-    {
-        var errors = Validate(Publish(request => request.Timestamp = _clock.UtcNowOffset.AddHours(1)));
+        => Assert.That(Errors(Publish(request => request.Timestamp = _clock.UtcNowOffset.AddHours(1))), Does.Contain("'timestamp'"));
 
-        Assert.Contains(errors, error => error.Contains("'timestamp'"));
-    }
-
-    [Fact]
+    [Test]
     public void Validate_Accepts_ATimestampWithinTheAllowedClockSkew()
     {
         // The CMS clock may be slightly ahead; that is not a reason to drop an event.
         var errors = Validate(Publish(request => request.Timestamp = _clock.UtcNowOffset.AddMinutes(1)));
 
-        Assert.Empty(errors);
+        Assert.That(errors, Is.Empty);
     }
 
     private CmsEventRequest Publish(Action<CmsEventRequest>? customize = null)
@@ -159,4 +130,7 @@ public class CmsEventRequestValidatorTests
 
         return [.. validator.Validate(request).Errors.Select(error => error.ErrorMessage)];
     }
+
+    /// <summary>The messages as one string, so an assertion reports every error when it fails.</summary>
+    private string Errors(CmsEventRequest request) => string.Join(" | ", Validate(request));
 }

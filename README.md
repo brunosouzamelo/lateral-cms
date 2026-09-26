@@ -4,7 +4,7 @@ A service that ingests live events from a CMS webhook, applies them to a local c
 that content over a REST API to authenticated consumers. Every entity is treated as confidential: no route is
 anonymous, and what a caller sees depends on who they are.
 
-`.NET 10` · `ASP.NET Core` · `EF Core` · `SQL Server` · `MediatR` · `FluentValidation` · `xUnit`
+`.NET 10` · `ASP.NET Core` · `EF Core` · `SQL Server` · `MediatR` · `FluentValidation` · `NUnit`
 
 ---
 
@@ -24,7 +24,9 @@ dotnet run --project src/Lateral.CMS.API
 ```
 
 The database itself is created and migrated on start. The API listens on <http://localhost:49699> (and
-<https://localhost:49698>); the reference UI is at <http://localhost:49699/scalar/v1>.
+<https://localhost:49698>); the reference UI is at <http://localhost:49699/docs>, which the launch profile opens
+directly and which the root redirects to. In Development only, it opens with the Basic credentials of the
+configured administrator already filled in, so requests can be sent from the page straight away.
 
 On macOS, or against any instance that uses SQL authentication, override the connection string instead of
 editing the file — see [Pointing at a different database](#pointing-at-a-different-database).
@@ -123,6 +125,7 @@ not undo it.
 | `GET` | `/api/v1/entities/{id}` | `User`, `Admin` | One entity, by the identifier the CMS assigned. |
 | `PUT` | `/api/v1/entities/{id}/disabled` | `Admin` | Disables or re-enables an entity locally. |
 | `GET` | `/health/live`, `/health/ready` | anonymous | Liveness and readiness probes. |
+| `GET` | `/docs`, `/` | anonymous | The API reference. Development only; the root redirects to it. |
 
 **Visibility.** One set of endpoints serves both audiences; what changes is what the query returns. A `User`
 sees entities that are published in the CMS and not disabled locally. An `Admin` sees all of them, plus the
@@ -289,7 +292,9 @@ commands are in `src/Lateral.CMS.Infrastructure.Data.SqlServer/MigrationCommands
 dotnet test
 ```
 
-No database, no configuration — the suite is self-contained and runs in a couple of seconds.
+No database, no configuration — the suite is self-contained and runs in a couple of seconds. NUnit, with the
+constraint model (`Assert.That`) throughout and `Assert.Multiple` where a test checks several properties of one
+result, so a failure reports all of them rather than stopping at the first.
 
 **The event rules** are tested directly against `CmsEventApplier` over a private SQLite database per test: each
 event type, the version-X+1 corner case, stale and duplicate deliveries, the ambiguous-ordering tie-break, and
