@@ -15,9 +15,9 @@
 	<ItemGroup>
 		<PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />
 		<!-- 12.5.0 is the last Apache-2.0 release of MediatR; 13+ requires a commercial license key. -->
-		<PackageReference Include="MediatR" Version="12.5.0" />
-		<PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.10" />
-		<PackageReference Include="NuvTools.Data.EntityFrameworkCore" Version="10.1.10" />
+		<PackageReference Include="MediatR" Version="14.2.0" />
+		<PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.12" />
+		<PackageReference Include="NuvTools.Data.EntityFrameworkCore" Version="10.1.11" />
 	</ItemGroup>
 	<ItemGroup>
 		<ProjectReference Include="..\Lateral.CMS.Domain\Lateral.CMS.Domain.csproj" />
