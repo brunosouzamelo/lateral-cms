@@ -239,6 +239,47 @@ public class IngestionEndpointTests
     }
 
     [Test]
+    public async Task EventLog_CarriesTheCorrelationIdentifierTheCmsSent()
+    {
+        var id = NextEntityId();
+        var correlationId = $"cms-trace-{Guid.NewGuid():N}";
+
+        var client = _factory.AsOrganization();
+        client.DefaultRequestHeaders.Add("X-Correlation-ID", correlationId);
+
+        var response = await client.PostEventsAsync(PublishEvent(id, 1, Timestamp));
+
+        // Echoed back, so the CMS can tie its own log line to this delivery.
+        Assert.That(response.Headers.GetValues("X-Correlation-ID"), Does.Contain(correlationId));
+
+        // And stored, so the delivery can be found later without going through the logs at all.
+        var events = await (await _factory.AsAdmin().GetAsync($"/cms/events?correlationId={correlationId}")).ReadJsonAsync();
+        var rows = events.GetProperty("list").EnumerateArray().ToList();
+
+        Assert.That(rows, Has.Count.EqualTo(1));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(rows[0].GetProperty("correlationId").GetString(), Is.EqualTo(correlationId));
+            Assert.That(rows[0].GetProperty("externalId").GetString(), Is.EqualTo(id));
+        });
+    }
+
+    [Test]
+    public async Task EventLog_StillCorrelates_WhenTheCmsSendsNoIdentifier()
+    {
+        var id = NextEntityId();
+
+        await _factory.AsOrganization().PostEventsAsync(PublishEvent(id, 1, Timestamp));
+
+        var events = await (await _factory.AsAdmin().GetAsync($"/cms/events?externalId={id}")).ReadJsonAsync();
+        var row = events.GetProperty("list").EnumerateArray().Single();
+
+        // Falls back to the trace identifier of the request, so no row is left uncorrelated.
+        Assert.That(row.GetProperty("correlationId").GetString(), Is.Not.Null.And.Not.Empty);
+    }
+
+    [Test]
     public async Task EventLog_NeverReturnsThePayload()
     {
         var id = NextEntityId();

@@ -8,9 +8,16 @@ namespace Lateral.CMS.API.Common;
 /// identifier of the request is used. Every log line written while the request runs carries it, because
 /// the identifier is pushed as a logging scope around the rest of the pipeline.
 /// </summary>
+/// <remarks>
+/// It is also put on <see cref="HttpContext.Items"/>, where <see cref="CorrelationContext"/> picks it up
+/// for the application layer to store alongside the events of the delivery.
+/// </remarks>
 public class CorrelationIdMiddleware(RequestDelegate next, ILogger<CorrelationIdMiddleware> logger)
 {
     public const string HeaderName = "X-Correlation-ID";
+
+    /// <summary>Key under which the resolved identifier is placed on the request.</summary>
+    public const string ItemKey = "Lateral.CMS.CorrelationId";
 
     private const int MaxLength = 64;
 
@@ -18,12 +25,13 @@ public class CorrelationIdMiddleware(RequestDelegate next, ILogger<CorrelationId
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        // The value is echoed back and logged, so it is sanitized like any other untrusted input.
+        // The value is echoed back, stored and logged, so it is sanitized like any other untrusted input.
         var correlationId = TextSanitizer.ForStorage(context.Request.Headers[HeaderName].FirstOrDefault(), MaxLength);
 
         if (string.IsNullOrWhiteSpace(correlationId))
             correlationId = context.TraceIdentifier;
 
+        context.Items[ItemKey] = correlationId;
         context.Response.Headers[HeaderName] = correlationId;
 
         // The message-template overload, rather than a dictionary: it names the property for a structured

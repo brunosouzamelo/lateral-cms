@@ -31,6 +31,12 @@ public class GetPagedCmsEventQueryHandler(ICmsReadOnlyDbContext context, IValida
             query = query.Where(e => e.ExternalId == externalId);
         }
 
+        if (!string.IsNullOrWhiteSpace(request.CorrelationId))
+        {
+            var correlationId = request.CorrelationId.Trim();
+            query = query.Where(e => e.CorrelationId == correlationId);
+        }
+
         var result = await query
             .OrderByDescending(e => e.CmsEventId)
             .Select(CmsEventDTO.Projection)

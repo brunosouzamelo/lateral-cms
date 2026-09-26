@@ -14,6 +14,7 @@ public class CmsEventConfiguration : IEntityTypeConfiguration<CmsEvent>
         builder.Property(e => e.ExternalId).HasMaxLength(CmsEventRequestValidator.ExternalIdMaxLength);
         builder.Property(e => e.StatusReason).HasMaxLength(2000);
         builder.Property(e => e.ReceivedBy).HasMaxLength(50);
+        builder.Property(e => e.CorrelationId).HasMaxLength(64);
 
         // Two processors picking the same event: the second SaveChanges fails and the event is re-evaluated.
         builder.Property(e => e.Attempts).IsConcurrencyToken();
@@ -22,5 +23,8 @@ public class CmsEventConfiguration : IEntityTypeConfiguration<CmsEvent>
         builder.HasIndex(e => new { e.CmsEventStatusId, e.NextAttemptDate, e.EventTimestamp });
         builder.HasIndex(e => e.BatchId);
         builder.HasIndex(e => e.ExternalId);
+
+        // Answers "what did this service do about that delivery" without scanning the inbox.
+        builder.HasIndex(e => e.CorrelationId);
     }
 }

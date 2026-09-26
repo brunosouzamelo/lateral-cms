@@ -62,6 +62,12 @@ public class CmsEventDTO
     /// <summary>The authenticated account that delivered it.</summary>
     public string? ReceivedBy { get; set; }
 
+    /// <summary>
+    /// Identifier of the request that brought the event. It is the <c>X-Correlation-ID</c> the CMS sent,
+    /// when it sent one, so a delivery can be followed across both systems and in the logs of either.
+    /// </summary>
+    public string? CorrelationId { get; set; }
+
     /// <summary>Server-side projection: only the returned columns are read, nothing is tracked.</summary>
     public static readonly Expression<Func<CmsEventEntity, CmsEventDTO>> Projection = e => new CmsEventDTO
     {
@@ -78,6 +84,7 @@ public class CmsEventDTO
         NextAttemptDate = e.NextAttemptDate,
         ProcessedDate = e.ProcessedDate,
         ReceivedDate = e.ReceivedDate,
-        ReceivedBy = e.ReceivedBy
+        ReceivedBy = e.ReceivedBy,
+        CorrelationId = e.CorrelationId
     };
 }

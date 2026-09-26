@@ -6,6 +6,10 @@ anonymous, and what a caller sees depends on who they are.
 
 `.NET 10` · `ASP.NET Core` · `EF Core` · `SQL Server` · `MediatR` · `FluentValidation` · `NUnit`
 
+- **Run it:** [Quick start](#quick-start) · [Postman](#postman) · [Simulating the CMS](#simulating-the-cms) · [Tests](#tests)
+- **Understand it:** [What the API does](#what-the-api-does) · [How events are processed](#how-events-are-processed) · [How it is put together](#how-it-is-put-together) · [Request lifecycles](#request-lifecycles) · [The code, file by file](#the-code-file-by-file)
+- **Look things up:** [Data model](#data-model) · [Configuration](#configuration) · [Performance](#performance) · [Observability](#observability) · [Choices worth explaining](#choices-worth-explaining)
+
 ---
 
 ## Quick start
@@ -66,6 +70,44 @@ It also runs headless:
 ```bash
 npx newman run postman/Lateral.CMS.postman_collection.json
 ```
+
+### Simulating the CMS
+
+`tools/Lateral.CMS.Simulator` stands in for the CMS. It talks to the webhook over HTTP with its own shapes —
+no reference to the service projects, so a breaking change to the contract cannot pass unnoticed there.
+
+```bash
+dotnet run --project tools/Lateral.CMS.Simulator
+```
+
+That runs seven scripted deliveries, each exercising one of the rules in
+[How events are processed](#how-events-are-processed), and then reads back what the service stored:
+
+```
+── never-published ─────────────────────────────────────────────
+   The corner case from the brief: version 5 is created but never published, then withdrawn...
+
+  → Published at version 4 (1 event)
+      receipt: 1 accepted, 0 rejected
+      processed: 1 Applied
+  → Version 5 withdrawn, having never been published (1 event)
+      OK   version: 5
+      OK   last published version: 4
+      OK   status: Unpublished
+```
+
+It waits for each batch to leave the inbox before checking, rather than sleeping, so it tests the background
+processor instead of racing it. The exit code is non-zero when a check does not match, which makes it usable
+as a smoke test after a deploy. Pick one with `--scenario <name>`; `--help` lists them.
+
+For volume instead of rules, `--stream` sends continuous random traffic — a plausible history per entity,
+with a share of deliveries repeated as a webhook retry would:
+
+```bash
+dotnet run --project tools/Lateral.CMS.Simulator -- --stream --events 500 --duplicates 20 --shuffle --seed 42
+```
+
+The re-deliveries come back as `Ignored` in the event log, which is idempotency visible at a glance.
 
 ### Users
 
@@ -136,7 +178,8 @@ exactly like one that does not exist, so the endpoint cannot be used to probe fo
 only write is the admin override, and it is stored in its own fields.
 
 **Querying.** List endpoints take `pageIndex`, `pageSize` (up to 100), `sortColumn`, `sortDirection` and
-`countMode`, and answer with `{ pageIndex, total, hasNextPage, list }`. Entities can be filtered by `id` prefix.
+`countMode`, and answer with `{ pageIndex, total, hasNextPage, list }`. Entities can be filtered by `id` prefix;
+the event log by `status`, `batchId`, `externalId` and `correlationId`.
 
 ---
 
@@ -191,6 +234,8 @@ src/
   Lateral.CMS.API                           controllers, authentication, problem details, hosting
 tests/
   Lateral.CMS.UnitTests                     the rules in isolation, and the real API in memory
+tools/
+  Lateral.CMS.Simulator                     stands in for the CMS; HTTP only, no project references
 ```
 
 Dependencies point inwards. The application layer names an `ICmsDbContext` and an `ICurrentUserService` and
@@ -212,6 +257,207 @@ from forging log lines.
 **Failures are per event, not per batch.** An event that fails validation is stored as `Rejected` and reported
 in the receipt by its index in the batch; the rest of the batch is still accepted. One malformed event does not
 cost the CMS a whole delivery.
+
+---
+
+## Request lifecycles
+
+Three paths run through this service. Naming the class at each step is the fastest way into the code.
+
+**A batch arrives at the webhook.** Everything here is synchronous and bounded by the size of the batch.
+
+```
+POST /cms/events
+  ├─ CorrelationIdMiddleware        resolves X-Correlation-ID, or falls back to the trace id,
+  │                                 and opens a logging scope around everything below
+  ├─ UseHttpLogging                 begins the single summary line the request will produce
+  ├─ BasicAuthenticationHandler     decodes the header, constant-time password check, roles → claims
+  ├─ Authorization                  policy CmsIngestion → the Organization role, and nothing else
+  ├─ CmsEventsController.Receive    one line: hands a ReceiveCmsEventsCommand to MediatR
+  │
+  └─ ReceiveCmsEventsCommandHandler
+       ├─ ReceiveCmsEventsCommandValidator   the batch is not empty and fits MaxBatchSize
+       ├─ for each event, on its own:
+       │    ├─ CmsEventRequestValidator      type, id, version, payload, timestamp
+       │    ├─ CmsEventTypeParser            "unPublish" → CmsEventType.UnPublish
+       │    ├─ CmsPayloadSanitizer           rebuilds the JSON node by node
+       │    ├─ CmsEventTimestamp             to UTC, truncated to microseconds
+       │    └─ TextSanitizer                 identifier, reason, correlation id
+       ├─ every event becomes a CmsEvent row: Pending, or Rejected carrying its reason
+       ├─ one SaveChanges — the whole batch lands in a single transaction
+       └─ ICmsEventProcessingSignal.Notify()
+
+  202 Accepted + CmsEventBatchReceiptDTO     ← the CMS is finished waiting at this point
+```
+
+**The processor drains the inbox**, on its own, after the answer has gone out.
+
+```
+CmsEventProcessorHostedService              (returns at once if Ingestion:ProcessInBackground is false)
+  └─ loop: whichever comes first — the signal above, or PollingInterval
+       └─ CmsEventProcessor.ProcessPendingAsync
+            ├─ GetPendingCmsEventIdsQuery    pending and due, oldest CMS timestamp first
+            └─ for each event, in its own DI scope, DbContext and transaction:
+                 ApplyCmsEventCommandHandler
+                   ├─ CmsEventApplier.ApplyAsync
+                   │    ├─ reads the entity and any tombstone for its identifier
+                   │    ├─ CmsEventOrdering.Compare → Newer | Duplicate | Stale
+                   │    └─ stages the change; it never saves
+                   ├─ writes the outcome onto the same CmsEvent row and clears the payload
+                   └─ one SaveChanges: the entity change and the inbox status commit together
+                 └─ on exception → RegisterCmsEventFailureCommandHandler
+                                   exponential back-off, or Failed at MaxProcessingAttempts
+```
+
+Two details that are easy to miss. The applier only *stages* changes, which is what lets the entity and the
+inbox row commit in the same transaction — an event can never be marked applied without its effect, or the
+other way round. And a pass that fills its batch starts the next one immediately instead of sleeping, so a
+backlog drains at full speed while an idle service stays quiet.
+
+**A consumer reads.** No part of this touches the writer database.
+
+```
+GET /api/v1/entities
+  ├─ …middleware and authentication exactly as above…
+  ├─ Authorization                     policy ContentReader → User or Admin
+  ├─ CmsEntitiesController.GetPaged    binds GetPagedCmsEntityQuery from the query string
+  │
+  └─ GetPagedCmsEntityQueryHandler
+       ├─ GetPagedCmsEntityQueryValidator    paging bounds, identifier length, enum values
+       ├─ ICurrentUserService                is this caller an administrator?
+       ├─ CmsEntityVisibility.For(isAdmin)   the single place visibility is decided
+       ├─ ICmsReadOnlyDbContext              no tracking, its own connection pool
+       ├─ CmsEntityDTO.Projection            server-side; only the returned columns are read
+       └─ PagingWrapWithEnumerableListAsync
+
+  ApiControllerBase.Respond → 200, or problem details with the right status
+```
+
+---
+
+## The code, file by file
+
+### Lateral.CMS.Domain
+
+No dependencies at all — not even EF Core. It is what the service is about, independent of how it is stored
+or served.
+
+| File | What it holds |
+| --- | --- |
+| `Entities/Content/CmsEntity.cs` | The stored copy: payload, `Version`, `LastPublishedVersion`, CMS status, the admin override fields, and a `ConcurrencyToken` renewed on every write. |
+| `Entities/Content/CmsEntityTombstone.cs` | A deletion marker: identifier and timestamp, deliberately no entity data. |
+| `Entities/Ingestion/CmsEvent.cs` | One inbox row per received event: what arrived, its status and reason, attempts, who delivered it and under which correlation id. |
+| `Entities/Common/AuditModifiedBase.cs` | `AddedDate` / `ModifiedDate`, applied by one EF configuration rather than repeated per entity. |
+| `Enumerations/CmsEntityStatus.cs` | `Published`, `Unpublished` — what the CMS decided, never the local override. |
+| `Enumerations/CmsEventType.cs` | `Publish`, `UnPublish`, `Delete`. |
+| `Enumerations/CmsEventStatus.cs` | `Pending`, `Applied`, `Ignored`, `Rejected`, `Failed`. |
+| `Constants/Role.cs` | The three roles, plus the set used to refuse an unknown one in configuration. |
+| `Constants/Policy.cs` | Policy names, shared by `Program.cs` and the controllers so the two cannot drift apart. |
+
+### Lateral.CMS.Application
+
+The rules, and the abstractions the host has to satisfy. Knows nothing about SQL Server or ASP.NET Core.
+
+| File | What it does |
+| --- | --- |
+| `ICmsDbContext.cs` | The writer. Commands and the processor use it. |
+| `ICmsReadOnlyDbContext.cs` | The reader. Exposes `IQueryable` only, so a write through it does not compile. |
+| `Content/IContentDbContext.cs`, `Ingestion/IIngestionDbContext.cs` | Narrower slices, so a handler reaches only the tables it needs. |
+| `ConfigureServicesExtensions.cs` | Registers the validators, MediatR, `IngestionOptions` and the ingestion services. |
+| `Common/TextSanitizer.cs` | Removes control characters and truncates. Everything untrusted that reaches a column or a log goes through it — this is what stops a crafted identifier forging log lines. |
+| `Common/IDateTimeService.cs`, `DateTimeService.cs` | The clock behind an interface, so a test decides what "now" is. |
+| `Common/ICorrelationContext.cs` | The correlation identifier, supplied by the host. |
+| `Common/Serialization/RawJsonStringConverter.cs` | Writes a stored JSON string as JSON, so a payload is not parsed and re-serialized on every read. |
+| `Common/Paging/PagingFilterValidator.cs` | One set of paging bounds, included by every paged query's validator. |
+| `Configuration/IngestionOptions.cs` | Every ingestion knob, with its default. |
+
+**Ingestion — the heart of the service.**
+
+| File | What it does |
+| --- | --- |
+| `Services/CmsEventApplier.cs` | **The rules.** Decides what one accepted event does to the stored state, and returns an outcome with the reason in words. Stages changes only. |
+| `Services/CmsEventOrdering.cs` | Whether an event is `Newer`, a `Duplicate` or `Stale`: version first, then timestamp, then the restrictive-status tie-break. |
+| `Services/CmsPayloadSanitizer.cs` | Rebuilds the payload node by node — size, depth, duplicated names, control characters, invalid Unicode, HTML escaping, exact number text. |
+| `Services/CmsEventTypeParser.cs` | The wire strings to the enumeration, case-insensitively, refusing the numeric values `Enum.TryParse` would accept. |
+| `Services/CmsEventTimestamp.cs` | To UTC, truncated to microseconds, so a re-delivery compares equal to what is stored and registers as a duplicate. |
+| `Services/CmsEventProcessor.cs` | One pass over the inbox, each event in its own scope so a failure is isolated. |
+| `Services/ICmsEventProcessingSignal.cs` | The wake-up, so the processor need not wait for a poll. |
+| `Handlers/ReceiveCmsEventsCommandHandler.cs` | Webhook intake: validate, sanitize, store the batch, signal, answer the receipt. |
+| `Handlers/ApplyCmsEventCommandHandler.cs` | Applies one event and records its outcome in the same transaction. |
+| `Handlers/GetPendingCmsEventIdsQueryHandler.cs` | What to process next. Reads the writer on purpose — a lagging replica would hide events just received. |
+| `Handlers/RegisterCmsEventFailureCommandHandler.cs` | Back-off and retry, then `Failed`. |
+| `Handlers/GetPagedCmsEventQueryHandler.cs` | The event log, filtered by status, batch, entity or correlation id. |
+| `Validators/*.cs` | Batch size; per event the type, id, version, payload and timestamp with its clock skew. |
+| `DTOs/*.cs` | The receipt, its rejections, and the event log row. |
+
+**Content — what consumers see.**
+
+| File | What it does |
+| --- | --- |
+| `Services/CmsEntityVisibility.cs` | One expression, applied to every read. Users see published and not locally disabled; administrators see everything. |
+| `Handlers/GetPagedCmsEntityQueryHandler.cs` | The listing, with the admin-only filters ignored for a consumer rather than refused. |
+| `Handlers/GetByCmsEntityIdQueryHandler.cs` | One entity. Not visible and not existing answer the same `404`. |
+| `Handlers/SetCmsEntityDisabledCommandHandler.cs` | The only write a caller can make: the local override, in its own fields. |
+| `DTOs/CmsEntityDTO.cs` | What a consumer receives, with a server-side projection. |
+
+### Lateral.CMS.Infrastructure
+
+The EF Core model, with nothing provider-specific in it.
+
+| File | What it does |
+| --- | --- |
+| `Data/CmsDbContext.cs` + `.Content.cs` + `.Ingestion.cs` | The context, split so each slice declares its own sets. |
+| `Data/Configuration/**` | Keys, lengths, indexes and concurrency tokens — see [Data model](#data-model). |
+| `Data/ReadOnlyDbContextGuard.cs` | The message a reader context throws when something tries to save through it. |
+| `Messaging/InProcessCmsEventProcessingSignal.cs` | A bounded channel of one: notifications coalesce, because a single pass drains everything pending. |
+
+### Lateral.CMS.Infrastructure.Data.SqlServer
+
+| File | What it does |
+| --- | --- |
+| `CmsDbContext.cs` | The shared model plus the `ISJSON` check constraints, which are provider-specific. |
+| `CmsReadOnlyDbContext.cs` | The same model bound to the read connection: no tracking, and `SaveChanges` throws. |
+| `CmsDbContextFactory.cs` | Design-time factory for `dotnet ef`, reading this project's own `appsettings.json`. |
+| `Migrations/` | `InitialCreate`, then `AddCmsEventCorrelationId`. |
+
+### Lateral.CMS.Infrastructure.IoC
+
+`DependencyInjectionExtensions.AddInfrastructure` is the composition root: it binds both contexts to their
+connection strings, maps every context interface onto them, registers the processing signal and then calls
+`AddApplicationServices`. It is the one file to change to move to another provider.
+
+### Lateral.CMS.API
+
+| File | What it does |
+| --- | --- |
+| `Program.cs` | The whole host: logging, versioning, authentication and policies, OpenAPI, health, problem details, migration on start, and the pipeline. |
+| `Controllers/CmsEventsController.cs` | The webhook and the event log. Version-neutral, because the CMS was given that path. |
+| `Controllers/V1/CmsEntitiesController.cs` | The consumer API, versioned under `/api/v1`. |
+| `Security/BasicAuthenticationHandler.cs` | RFC 7617: parses the header, refuses invalid base64 and UTF-8, splits at the first colon so a password may contain one. |
+| `Security/BasicAuthenticationCredentialStore.cs` | The configured users. Constant-time comparison, and an unknown user still pays for one. Also validates the section at start-up. |
+| `Security/CurrentUserService.cs` | The authenticated caller, for the application layer. |
+| `Common/ApiControllerBase.cs` | The single place an outcome becomes a status code, and the `ApiError` shape. |
+| `Common/GlobalExceptionHandler.cs` | Last line of defence: the same problem-details shape, with the exception kept out of the response. |
+| `Common/CorrelationIdMiddleware.cs` | Resolves the identifier, echoes it, puts it on the request and opens the logging scope. |
+| `Common/CorrelationContext.cs` | Hands that identifier to the application layer. |
+| `Common/CmsHttpLoggingInterceptor.cs` | Adds caller, client address, user agent and correlation id to the request log line. |
+| `Common/DatabaseHealthCheck.cs` | Readiness: the writer must answer before the webhook can accept anything. |
+| `Common/DatabaseStartupExtensions.cs` | Migrates with retries, so a database that is still starting does not take the service down with it. |
+| `Common/BasicAuthenticationDocumentTransformer.cs` | Declares the Basic scheme in the OpenAPI document. |
+| `HostedServices/CmsEventProcessorHostedService.cs` | The background loop around `CmsEventProcessor`. |
+| `Models/SetCmsEntityDisabledRequest.cs` | The body of the override. |
+
+### tools/Lateral.CMS.Simulator
+
+| File | What it does |
+| --- | --- |
+| `Program.cs` | Argument handling, Ctrl+C, and the exit code. |
+| `SimulatorOptions.cs` | The options and the help text. A bad argument stops the run rather than being ignored. |
+| `CmsWebhookClient.cs` | Posts batches, waits for the inbox to drain, reads entities back. |
+| `CmsEvents.cs` | The wire shapes, including deliberately malformed ones. |
+| `Scenarios.cs` | The scripted deliveries, and what each should produce. |
+| `ScenarioRunner.cs` | Runs them, prints what happened, counts mismatches. |
+| `StreamGenerator.cs` | Random traffic with a plausible history per entity. |
 
 ---
 
@@ -251,6 +497,11 @@ Every log line written while a request runs carries a correlation identifier, pu
 CMS can send `X-Correlation-ID` to follow one delivery across both systems, and it is echoed back on the
 response. Scopes also carry the framework's `TraceId` and `SpanId`, so lines correlate without any extra work.
 
+The identifier is **stored, not only logged**. Every event row keeps the one its delivery arrived under, so
+`GET /cms/events?correlationId=...` turns a trace in the CMS into the list of what this service did about it —
+without reading a log line, and long after the logs have rolled. When the CMS sends none, the request's trace
+identifier is used, so no row is left uncorrelated.
+
 Every event is logged when it is received and again when it is processed, with its outcome and the reason, and
 the message template names each value so a collector can index them:
 
@@ -271,18 +522,101 @@ Failures are logged too, and they are not only in the log: the reason is stored 
 
 ---
 
-## Data and migrations
+## Data model
 
-Two schemas. `Ingestion.CmsEvent` is the inbox — one row per event received, with its status, attempts and
-outcome; the payload is cleared once the event is applied or ignored, so confidential data is not kept twice.
-`Content.CmsEntity` holds the current state of each entity, and `Content.CmsEntityTombstone` the deletion
-markers, which carry an identifier and a timestamp and no data at all.
+Two schemas, three tables. `Ingestion` is the record of what arrived; `Content` is the state it produced.
 
-Payloads are `nvarchar(max)` with an `ISJSON` check constraint: SQL Server has no JSON column type, and the
+### `Ingestion.CmsEvent` — the inbox
+
+One row per event received, whether it was usable or not. It is both the work queue and the audit trail.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `CmsEventId` | `bigint`, identity | Primary key. Also the order in which events arrived. |
+| `BatchId` | `uniqueidentifier` | The delivery. A UUIDv7, so it sorts by time. |
+| `BatchIndex` | `int` | Position in that delivery, which is how a rejection is reported. |
+| `CmsEventTypeId` | `int`, null | Null when the type was missing or unsupported. |
+| `ExternalId` | `nvarchar(128)`, null | The entity, as the CMS names it. |
+| `Version` | `int`, null | Null for a delete. |
+| `Payload` | `nvarchar(max)`, null | **Cleared once the event is applied or ignored**, so confidential data is not kept twice. Kept on a `Failed` row, for a replay. |
+| `EventTimestamp` | `datetimeoffset`, null | UTC, truncated to microseconds. |
+| `CmsEventStatusId` | `int` | See `CmsEventStatus`. |
+| `StatusReason` | `nvarchar(2000)`, null | Why, in words. This is what makes the log useful without the logs. |
+| `Attempts` | `int` | **Concurrency token.** Two processors racing for one event: the second `SaveChanges` fails and the event is re-evaluated. |
+| `NextAttemptDate` | `datetimeoffset`, null | When a retry becomes due. |
+| `ProcessedDate` | `datetimeoffset`, null | When it reached a final status. |
+| `ReceivedDate` | `datetimeoffset` | When the webhook took it in. |
+| `ReceivedBy` | `nvarchar(50)` | The authenticated account that delivered it. |
+| `CorrelationId` | `nvarchar(64)`, null | The delivery's trace — the CMS's own, or the request's. |
+
+Indexes: `(CmsEventStatusId, NextAttemptDate, EventTimestamp)` covers the pick-up query the processor runs on
+every pass; `BatchId`, `ExternalId` and `CorrelationId` each back one filter of the event log.
+
+### `Content.CmsEntity` — the current state
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `CmsEntityId` | `uniqueidentifier` | Primary key, a UUIDv7 generated here. |
+| `ExternalId` | `nvarchar(128)`, unique | The CMS's identifier. The unique index is what makes an entity one row. |
+| `Payload` | `nvarchar(max)` | The fields at `Version`. `ISJSON` check constraint. |
+| `Version` | `int` | Latest data known, published or not. |
+| `LastPublishedVersion` | `int`, null | Last version that arrived through a publish. |
+| `CmsEntityStatusId` | `int` | The CMS's decision. |
+| `LastEventTimestamp` | `datetimeoffset` | When the entity last changed in the CMS. Half of the ordering rule. |
+| `IsDisabledByAdmin` | `bit` | The local override. Never sent to the CMS. |
+| `DisabledByAdminDate` | `datetimeoffset`, null | |
+| `DisabledByAdminUser` | `nvarchar(50)`, null | |
+| `ConcurrencyToken` | `uniqueidentifier` | Renewed on every write. |
+| `AddedDate`, `ModifiedDate` | `datetimeoffset` | |
+
+Indexes: unique on `ExternalId`; `(CmsEntityStatusId, IsDisabledByAdmin, ExternalId)` covers the consumer
+listing — published, not disabled, ordered by identifier — without reading rows it may not return.
+
+### `Content.CmsEntityTombstone` — deletion markers
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `ExternalId` | `nvarchar(128)` | Primary key. |
+| `DeletedTimestamp` | `datetimeoffset` | Concurrency token, and the cut-off for late events. |
+| `AddedDate` | `datetimeoffset` | |
+
+No payload, no version, no status: a tombstone holds the minimum needed to make a deletion stick, and
+nothing of what was deleted.
+
+### Migrations
+
+Applied at start-up, with retries while the database is still coming up. Set `Database:MigrateOnStartup` to
+`false` to apply them separately; the commands are in
+`src/Lateral.CMS.Infrastructure.Data.SqlServer/MigrationCommands.txt`.
+
+Payloads are `nvarchar(max)` with an `ISJSON` check constraint. SQL Server has no JSON column type, and the
 constraint is the part of one worth keeping — the database refuses to store anything that is not JSON.
 
-Migrations are applied at start-up. Set `Database:MigrateOnStartup` to `false` to apply them separately; the
-commands are in `src/Lateral.CMS.Infrastructure.Data.SqlServer/MigrationCommands.txt`.
+---
+
+## Configuration
+
+Everything below is ordinary configuration, so any provider overrides it: `appsettings.json`,
+`appsettings.{Environment}.json`, user secrets, environment variables (`Section__Key`), command line.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `ConnectionStrings:Database` | local SQL Server, Windows auth | The writer. Commands, the processor and migrations use it. |
+| `ConnectionStrings:DatabaseReadOnly` | *empty* | The reader. Point it at a replica to move every API query there; empty uses the writer. |
+| `Database:MigrateOnStartup` | `true` | Applies pending migrations when the host starts. |
+| `Database:MigrationTimeout` | `00:02:00` | How long to keep retrying while the database is unreachable, before giving up and failing the start. |
+| `Authentication:Basic:Realm` | `Lateral CMS` | Returned in the `WWW-Authenticate` challenge. |
+| `Authentication:Basic:Users` | three accounts | `UserName`, `Password`, `Roles`. Validated at start-up: no users, a missing password or an unknown role stops the host rather than surfacing later. |
+| `Ingestion:MaxBatchSize` | `1000` | Events accepted in one webhook call. |
+| `Ingestion:MaxPayloadBytes` | `262144` | Largest sanitized payload, in UTF-8 bytes. |
+| `Ingestion:MaxPayloadDepth` | `32` | Deepest nesting a payload may have. |
+| `Ingestion:AllowedClockSkew` | `00:05:00` | How far ahead of this service's clock an event timestamp may be. |
+| `Ingestion:ProcessInBackground` | `true` | Runs the in-process processor. Turn it off to process from another host — or, as the tests do, to decide when events are applied. |
+| `Ingestion:ProcessingBatchSize` | `200` | Events picked per pass. A full pass starts the next one immediately. |
+| `Ingestion:PollingInterval` | `00:00:10` | Longest wait between passes when no batch arrives. This is what picks up events left by a restart and retries that became due. |
+| `Ingestion:MaxProcessingAttempts` | `5` | Attempts before an event is parked as `Failed`. |
+| `Ingestion:RetryBaseDelay` | `00:00:02` | Base of the exponential back-off, capped at ten minutes. |
+| `Logging:LogLevel:*` | `Information` | The usual levels. `Microsoft.AspNetCore.HttpLogging` is kept at `Information` so the per-request line survives the `Microsoft.AspNetCore` override. |
 
 ---
 

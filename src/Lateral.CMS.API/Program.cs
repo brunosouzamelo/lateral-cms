@@ -3,6 +3,7 @@ using Lateral.CMS.API.Common;
 using Lateral.CMS.API.Configuration;
 using Lateral.CMS.API.HostedServices;
 using Lateral.CMS.API.Security;
+using Lateral.CMS.Application.Common;
 using Lateral.CMS.Application.Security;
 using Lateral.CMS.Domain.Constants;
 using Lateral.CMS.Infrastructure.Data.SqlServer;
@@ -96,6 +97,7 @@ try
 
     builder.Services.AddHttpContextAccessor();
     builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
+    builder.Services.AddScoped<ICorrelationContext, CorrelationContext>();
 
     builder.Services.AddHostedService<CmsEventProcessorHostedService>();
 

@@ -5,19 +5,76 @@
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
-    { "key": "baseUrl", "value": "http://localhost:49699", "type": "string" },
-    { "key": "orgUser", "value": "cms-webhook-client", "type": "string" },
-    { "key": "orgPassword", "value": "fd23cb16-5bd5-4334-9115-b9a0ebde5a3d", "type": "string" },
-    { "key": "consumerUser", "value": "content-consumer-1", "type": "string" },
-    { "key": "consumerPassword", "value": "ec12ccd4-e9dc-4cb3-bae6-e5f08a7a8359", "type": "string" },
-    { "key": "adminUser", "value": "content-admin-root", "type": "string" },
-    { "key": "adminPassword", "value": "226b714d-e4bf-4656-859b-67c0950e23ff", "type": "string" },
-    { "key": "invalidPassword", "value": "not-the-password", "type": "string" },
-    { "key": "publishedId", "value": "", "type": "string" },
-    { "key": "unpublishedId", "value": "", "type": "string" },
-    { "key": "deletedId", "value": "", "type": "string" },
-    { "key": "eventTimestamp", "value": "", "type": "string" },
-    { "key": "deleteTimestamp", "value": "", "type": "string" }
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:49699",
+      "type": "string"
+    },
+    {
+      "key": "orgUser",
+      "value": "cms-webhook-client",
+      "type": "string"
+    },
+    {
+      "key": "orgPassword",
+      "value": "fd23cb16-5bd5-4334-9115-b9a0ebde5a3d",
+      "type": "string"
+    },
+    {
+      "key": "consumerUser",
+      "value": "content-consumer-1",
+      "type": "string"
+    },
+    {
+      "key": "consumerPassword",
+      "value": "ec12ccd4-e9dc-4cb3-bae6-e5f08a7a8359",
+      "type": "string"
+    },
+    {
+      "key": "adminUser",
+      "value": "content-admin-root",
+      "type": "string"
+    },
+    {
+      "key": "adminPassword",
+      "value": "226b714d-e4bf-4656-859b-67c0950e23ff",
+      "type": "string"
+    },
+    {
+      "key": "invalidPassword",
+      "value": "not-the-password",
+      "type": "string"
+    },
+    {
+      "key": "publishedId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "unpublishedId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "deletedId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "eventTimestamp",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "deleteTimestamp",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "correlationId",
+      "value": "",
+      "type": "string"
+    }
   ],
   "item": [
     {
@@ -27,10 +84,21 @@
         {
           "name": "Liveness",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "header": [],
-            "url": { "raw": "{{baseUrl}}/health/live", "host": ["{{baseUrl}}"], "path": ["health", "live"] },
+            "url": {
+              "raw": "{{baseUrl}}/health/live",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "live"
+              ]
+            },
             "description": "Answers as soon as the process is up. Runs no checks."
           },
           "event": [
@@ -48,10 +116,21 @@
         {
           "name": "Readiness",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "header": [],
-            "url": { "raw": "{{baseUrl}}/health/ready", "host": ["{{baseUrl}}"], "path": ["health", "ready"] },
+            "url": {
+              "raw": "{{baseUrl}}/health/ready",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "ready"
+              ]
+            },
             "description": "Confirms the writer database answers. Unhealthy means the webhook cannot store a batch."
           },
           "event": [
@@ -74,8 +153,16 @@
       "auth": {
         "type": "basic",
         "basic": [
-          { "key": "username", "value": "{{orgUser}}", "type": "string" },
-          { "key": "password", "value": "{{orgPassword}}", "type": "string" }
+          {
+            "key": "username",
+            "value": "{{orgUser}}",
+            "type": "string"
+          },
+          {
+            "key": "password",
+            "value": "{{orgPassword}}",
+            "type": "string"
+          }
         ]
       },
       "item": [
@@ -83,13 +170,35 @@
           "name": "Publish a batch",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "[\n  {\n    \"type\": \"publish\",\n    \"id\": \"{{publishedId}}\",\n    \"version\": 2,\n    \"payload\": { \"title\": \"A published entity\", \"tags\": [\"demo\"] },\n    \"timestamp\": \"{{eventTimestamp}}\"\n  },\n  {\n    \"type\": \"unPublish\",\n    \"id\": \"{{unpublishedId}}\",\n    \"version\": 4,\n    \"payload\": { \"title\": \"An unpublished entity\" },\n    \"timestamp\": \"{{eventTimestamp}}\"\n  },\n  {\n    \"type\": \"publish\",\n    \"id\": \"{{deletedId}}\",\n    \"version\": 1,\n    \"payload\": { \"title\": \"About to be deleted\" },\n    \"timestamp\": \"{{eventTimestamp}}\"\n  }\n]",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
-            "url": { "raw": "{{baseUrl}}/cms/events", "host": ["{{baseUrl}}"], "path": ["cms", "events"] },
+            "url": {
+              "raw": "{{baseUrl}}/cms/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cms",
+                "events"
+              ]
+            },
             "description": "One batch with all three event types. The identifiers are generated per run, so the collection can be run repeatedly against the same database.\n\nThe answer is `202`, not `200`: the batch is stored and applied afterwards by the background processor."
           },
           "event": [
@@ -107,7 +216,11 @@
                   "",
                   "// Slightly in the past: an event timestamp may not be further ahead than the allowed clock skew.",
                   "pm.collectionVariables.set('eventTimestamp', new Date(stamp - 60000).toISOString());",
-                  "pm.collectionVariables.set('deleteTimestamp', new Date(stamp - 30000).toISOString());"
+                  "pm.collectionVariables.set('deleteTimestamp', new Date(stamp - 30000).toISOString());",
+                  "",
+                  "// The CMS's own trace for this delivery. The service stores it against every event of the batch",
+                  "// and echoes it back, so one delivery can be followed across both systems.",
+                  "pm.collectionVariables.set('correlationId', `cms-trace-${stamp}`);"
                 ]
               }
             },
@@ -128,7 +241,10 @@
                   "",
                   "pm.test('the receipt identifies the batch', () => pm.expect(receipt.batchId).to.be.a('string'));",
                   "",
-                  "pm.collectionVariables.set('batchId', receipt.batchId);"
+                  "pm.collectionVariables.set('batchId', receipt.batchId);",
+                  "",
+                  "pm.test('the correlation identifier is echoed back', () =>",
+                  "    pm.expect(pm.response.headers.get('X-Correlation-ID')).to.eql(pm.collectionVariables.get('correlationId')));"
                 ]
               }
             }
@@ -138,13 +254,31 @@
           "name": "Delete an entity",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "[\n  {\n    \"type\": \"delete\",\n    \"id\": \"{{deletedId}}\",\n    \"timestamp\": \"{{deleteTimestamp}}\"\n  }\n]",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
-            "url": { "raw": "{{baseUrl}}/cms/events", "host": ["{{baseUrl}}"], "path": ["cms", "events"] },
+            "url": {
+              "raw": "{{baseUrl}}/cms/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cms",
+                "events"
+              ]
+            },
             "description": "A delete carries no version and no payload. It hard-deletes the entity and leaves a tombstone, so an event still in flight for it cannot bring it back."
           },
           "event": [
@@ -164,13 +298,31 @@
           "name": "Batch with an invalid event",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "[\n  {\n    \"type\": \"publish\",\n    \"id\": \"{{publishedId}}-extra\",\n    \"version\": 1,\n    \"payload\": { \"title\": \"This one is fine\" },\n    \"timestamp\": \"{{eventTimestamp}}\"\n  },\n  {\n    \"type\": \"publish\",\n    \"id\": \"missing-version\",\n    \"payload\": { \"title\": \"No version\" },\n    \"timestamp\": \"{{eventTimestamp}}\"\n  }\n]",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
-            "url": { "raw": "{{baseUrl}}/cms/events", "host": ["{{baseUrl}}"], "path": ["cms", "events"] },
+            "url": {
+              "raw": "{{baseUrl}}/cms/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cms",
+                "events"
+              ]
+            },
             "description": "Each event is validated on its own. The invalid one is reported in the receipt by its index in the batch and the valid one is still accepted, so a single malformed event does not cost the CMS the whole delivery."
           },
           "event": [
@@ -204,9 +356,31 @@
           "name": "Empty batch",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "[]", "options": { "raw": { "language": "json" } } },
-            "url": { "raw": "{{baseUrl}}/cms/events", "host": ["{{baseUrl}}"], "path": ["cms", "events"] },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/cms/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cms",
+                "events"
+              ]
+            },
             "description": "The batch itself is unusable, so nothing is stored and the answer is a `400` with problem details."
           },
           "event": [
@@ -226,13 +400,31 @@
           "name": "Re-deliver the first batch",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "[\n  {\n    \"type\": \"publish\",\n    \"id\": \"{{publishedId}}\",\n    \"version\": 2,\n    \"payload\": { \"title\": \"A published entity\", \"tags\": [\"demo\"] },\n    \"timestamp\": \"{{eventTimestamp}}\"\n  }\n]",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
-            "url": { "raw": "{{baseUrl}}/cms/events", "host": ["{{baseUrl}}"], "path": ["cms", "events"] },
+            "url": {
+              "raw": "{{baseUrl}}/cms/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cms",
+                "events"
+              ]
+            },
             "description": "Webhook delivery is at-least-once, so the same event arrives twice after a timeout. It is accepted again — the inbox records every delivery — but applying it changes nothing: the event log shows it as `Ignored`.\n\nSee **Event log for the published entity** in the admin folder."
           },
           "event": [
@@ -256,8 +448,16 @@
       "auth": {
         "type": "basic",
         "basic": [
-          { "key": "username", "value": "{{consumerUser}}", "type": "string" },
-          { "key": "password", "value": "{{consumerPassword}}", "type": "string" }
+          {
+            "key": "username",
+            "value": "{{consumerUser}}",
+            "type": "string"
+          },
+          {
+            "key": "password",
+            "value": "{{consumerPassword}}",
+            "type": "string"
+          }
         ]
       },
       "item": [
@@ -268,14 +468,38 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/entities?pageIndex=0&pageSize=20",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "entities"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "entities"
+              ],
               "query": [
-                { "key": "pageIndex", "value": "0" },
-                { "key": "pageSize", "value": "20" },
-                { "key": "sortColumn", "value": "LastEventTimestamp", "disabled": true },
-                { "key": "sortDirection", "value": "DESC", "disabled": true },
-                { "key": "id", "value": "pm-", "disabled": true }
+                {
+                  "key": "pageIndex",
+                  "value": "0"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "sortColumn",
+                  "value": "LastEventTimestamp",
+                  "disabled": true
+                },
+                {
+                  "key": "sortDirection",
+                  "value": "DESC",
+                  "disabled": true
+                },
+                {
+                  "key": "id",
+                  "value": "pm-",
+                  "disabled": true
+                }
               ]
             },
             "description": "Paged listing. `pageSize` is capped at 100; the answer is `{ pageIndex, total, hasNextPage, list }`.\n\nThe disabled query parameters show the other options: sorting and filtering by identifier prefix."
@@ -325,8 +549,15 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/entities/{{publishedId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "entities", "{{publishedId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "entities",
+                "{{publishedId}}"
+              ]
             },
             "description": "The payload is returned as JSON, not as an escaped string, so a consumer does not have to parse it twice.\n\n`version` is the latest data the service holds; `lastPublishedVersion` is the last one that arrived through a publish."
           },
@@ -363,8 +594,15 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/entities/{{unpublishedId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "entities", "{{unpublishedId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "entities",
+                "{{unpublishedId}}"
+              ]
             },
             "description": "Unpublishing in the CMS keeps the entity in the persistence layer but hides it from consumers.\n\nThe answer is `404`, exactly like an entity that does not exist, so this endpoint cannot be used to discover the identifiers of hidden entities. An administrator can still read it — see the admin folder."
           },
@@ -387,8 +625,15 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/entities/{{deletedId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "entities", "{{deletedId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "entities",
+                "{{deletedId}}"
+              ]
             },
             "description": "A delete is a hard delete: the row is gone, and no account can read it back."
           },
@@ -412,8 +657,16 @@
       "auth": {
         "type": "basic",
         "basic": [
-          { "key": "username", "value": "{{adminUser}}", "type": "string" },
-          { "key": "password", "value": "{{adminPassword}}", "type": "string" }
+          {
+            "key": "username",
+            "value": "{{adminUser}}",
+            "type": "string"
+          },
+          {
+            "key": "password",
+            "value": "{{adminPassword}}",
+            "type": "string"
+          }
         ]
       },
       "item": [
@@ -424,8 +677,15 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/entities/{{unpublishedId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "entities", "{{unpublishedId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "entities",
+                "{{unpublishedId}}"
+              ]
             },
             "description": "The same route the consumer got a `404` from. No separate endpoint: what changes is what the query returns.\n\nNote `lastPublishedVersion` is `null` — this entity reached the service through an unPublish and was never published, so its data is version 4 but no version of it was ever public."
           },
@@ -457,12 +717,28 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/entities?status=Unpublished&pageSize=20",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "entities"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "entities"
+              ],
               "query": [
-                { "key": "status", "value": "Unpublished" },
-                { "key": "pageSize", "value": "20" },
-                { "key": "isDisabledByAdmin", "value": "true", "disabled": true }
+                {
+                  "key": "status",
+                  "value": "Unpublished"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "isDisabledByAdmin",
+                  "value": "true",
+                  "disabled": true
+                }
               ]
             },
             "description": "`status` and `isDisabledByAdmin` are administrator-only filters. A consumer sending them is not refused — they are simply ignored, because they could not widen what a consumer is allowed to see."
@@ -486,16 +762,33 @@
           "name": "Disable the published entity",
           "request": {
             "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"isDisabled\": true\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/entities/{{publishedId}}/disabled",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "entities", "{{publishedId}}", "disabled"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "entities",
+                "{{publishedId}}",
+                "disabled"
+              ]
             },
             "description": "The only write the API allows. It is a local override: it hides the entity from consumers here and is never sent back to the CMS, whose data — payload, version, published status — stays untouched and cannot be changed through this API by anybody."
           },
@@ -517,16 +810,31 @@
             "auth": {
               "type": "basic",
               "basic": [
-                { "key": "username", "value": "{{consumerUser}}", "type": "string" },
-                { "key": "password", "value": "{{consumerPassword}}", "type": "string" }
+                {
+                  "key": "username",
+                  "value": "{{consumerUser}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{consumerPassword}}",
+                  "type": "string"
+                }
               ]
             },
             "method": "GET",
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/entities/{{publishedId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "entities", "{{publishedId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "entities",
+                "{{publishedId}}"
+              ]
             },
             "description": "The same request that answered `200` in the consumer folder, sent again after the override."
           },
@@ -549,8 +857,15 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/entities/{{publishedId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "entities", "{{publishedId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "entities",
+                "{{publishedId}}"
+              ]
             },
             "description": "The override is recorded in its own fields — `isDisabledByAdmin` and `disabledByAdminDate` — next to untouched CMS data."
           },
@@ -582,16 +897,33 @@
           "name": "Re-enable the entity",
           "request": {
             "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"isDisabled\": false\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/entities/{{publishedId}}/disabled",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "entities", "{{publishedId}}", "disabled"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "entities",
+                "{{publishedId}}",
+                "disabled"
+              ]
             },
             "description": "The override is reversible and leaves no trace on the CMS data."
           },
@@ -611,16 +943,33 @@
           "name": "Disable an entity that is not stored",
           "request": {
             "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"isDisabled\": true\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/entities/{{deletedId}}/disabled",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "entities", "{{deletedId}}", "disabled"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "entities",
+                "{{deletedId}}",
+                "disabled"
+              ]
             },
             "description": "The entity was hard-deleted by the CMS, and the override went with it."
           },
@@ -643,12 +992,28 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/cms/events?externalId={{publishedId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["cms", "events"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cms",
+                "events"
+              ],
               "query": [
-                { "key": "externalId", "value": "{{publishedId}}" },
-                { "key": "status", "value": "Failed", "disabled": true },
-                { "key": "batchId", "value": "{{batchId}}", "disabled": true }
+                {
+                  "key": "externalId",
+                  "value": "{{publishedId}}"
+                },
+                {
+                  "key": "status",
+                  "value": "Failed",
+                  "disabled": true
+                },
+                {
+                  "key": "batchId",
+                  "value": "{{batchId}}",
+                  "disabled": true
+                }
               ]
             },
             "description": "The processing record of every event received, newest first, with the outcome and the reason for it. Payloads are never returned here.\n\nThe two rows for this entity are the original delivery (`Applied`) and the re-delivery (`Ignored`, as a duplicate) — which is what makes the webhook safe to retry.\n\nFilter by `status=Failed` to answer \"what did not get through, and why\"."
@@ -674,6 +1039,49 @@
               }
             }
           ]
+        },
+        {
+          "name": "Event log for one delivery",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/cms/events?correlationId={{correlationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cms",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "correlationId",
+                  "value": "{{correlationId}}"
+                }
+              ]
+            },
+            "description": "The same log, filtered by the identifier the CMS sent on the delivery rather than by entity. This is what turns a trace in the CMS into the list of what this service did about it — without reading a single log line.\n\nThe first batch carried three events, so three rows come back, all with that identifier."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "",
+                  "const rows = pm.response.json().list;",
+                  "const expected = pm.collectionVariables.get('correlationId');",
+                  "",
+                  "pm.test('the whole delivery comes back', () => pm.expect(rows).to.have.lengthOf(3));",
+                  "",
+                  "pm.test('every row carries the identifier the CMS sent', () =>",
+                  "    rows.forEach(row => pm.expect(row.correlationId).to.eql(expected)));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -684,13 +1092,21 @@
         {
           "name": "No credentials",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/entities",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "entities"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "entities"
+              ]
             },
             "description": "Authorization is closed by default: the fallback policy requires an authenticated user, so a route is private unless it opts out."
           },
@@ -715,16 +1131,30 @@
             "auth": {
               "type": "basic",
               "basic": [
-                { "key": "username", "value": "{{consumerUser}}", "type": "string" },
-                { "key": "password", "value": "{{invalidPassword}}", "type": "string" }
+                {
+                  "key": "username",
+                  "value": "{{consumerUser}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{invalidPassword}}",
+                  "type": "string"
+                }
               ]
             },
             "method": "GET",
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/entities",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "entities"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "entities"
+              ]
             },
             "description": "Passwords are compared in constant time, and an unknown user still pays for a comparison, so neither the password nor the existence of a user can be inferred from how long the request takes."
           },
@@ -746,16 +1176,30 @@
             "auth": {
               "type": "basic",
               "basic": [
-                { "key": "username", "value": "someone-unknown", "type": "string" },
-                { "key": "password", "value": "{{consumerPassword}}", "type": "string" }
+                {
+                  "key": "username",
+                  "value": "someone-unknown",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{consumerPassword}}",
+                  "type": "string"
+                }
               ]
             },
             "method": "GET",
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/entities",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "entities"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "entities"
+              ]
             },
             "description": "A valid password belonging to another account does not help: the pair has to match."
           },
@@ -774,13 +1218,26 @@
         {
           "name": "Malformed Authorization header",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Basic not-base-64!!" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic not-base-64!!"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/api/v1/entities",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "entities"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "entities"
+              ]
             },
             "description": "A header that is not a decodable `user:password` pair is rejected before anything is looked up."
           },
@@ -802,16 +1259,30 @@
             "auth": {
               "type": "basic",
               "basic": [
-                { "key": "username", "value": "{{orgUser}}", "type": "string" },
-                { "key": "password", "value": "{{orgPassword}}", "type": "string" }
+                {
+                  "key": "username",
+                  "value": "{{orgUser}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{orgPassword}}",
+                  "type": "string"
+                }
               ]
             },
             "method": "GET",
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/entities",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "entities"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "entities"
+              ]
             },
             "description": "Authenticated, but `403`: the organization account exists only to deliver events. The brief asks for the CMS and the consumers to be separate users, and the separation is enforced by role, not by convention."
           },
@@ -833,18 +1304,44 @@
             "auth": {
               "type": "basic",
               "basic": [
-                { "key": "username", "value": "{{consumerUser}}", "type": "string" },
-                { "key": "password", "value": "{{consumerPassword}}", "type": "string" }
+                {
+                  "key": "username",
+                  "value": "{{consumerUser}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{consumerPassword}}",
+                  "type": "string"
+                }
               ]
             },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "[\n  {\n    \"type\": \"publish\",\n    \"id\": \"forged-entity\",\n    \"version\": 1,\n    \"payload\": { \"title\": \"Forged\" },\n    \"timestamp\": \"{{eventTimestamp}}\"\n  }\n]",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
-            "url": { "raw": "{{baseUrl}}/cms/events", "host": ["{{baseUrl}}"], "path": ["cms", "events"] },
+            "url": {
+              "raw": "{{baseUrl}}/cms/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cms",
+                "events"
+              ]
+            },
             "description": "The other direction of the same separation: a reader cannot inject content."
           },
           "event": [
@@ -865,21 +1362,46 @@
             "auth": {
               "type": "basic",
               "basic": [
-                { "key": "username", "value": "{{consumerUser}}", "type": "string" },
-                { "key": "password", "value": "{{consumerPassword}}", "type": "string" }
+                {
+                  "key": "username",
+                  "value": "{{consumerUser}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{consumerPassword}}",
+                  "type": "string"
+                }
               ]
             },
             "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"isDisabled\": true\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/entities/{{publishedId}}/disabled",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "entities", "{{publishedId}}", "disabled"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "entities",
+                "{{publishedId}}",
+                "disabled"
+              ]
             },
             "description": "The override is an administrator's decision."
           },
@@ -901,13 +1423,30 @@
             "auth": {
               "type": "basic",
               "basic": [
-                { "key": "username", "value": "{{consumerUser}}", "type": "string" },
-                { "key": "password", "value": "{{consumerPassword}}", "type": "string" }
+                {
+                  "key": "username",
+                  "value": "{{consumerUser}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{consumerPassword}}",
+                  "type": "string"
+                }
               ]
             },
             "method": "GET",
             "header": [],
-            "url": { "raw": "{{baseUrl}}/cms/events", "host": ["{{baseUrl}}"], "path": ["cms", "events"] },
+            "url": {
+              "raw": "{{baseUrl}}/cms/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cms",
+                "events"
+              ]
+            },
             "description": "The log lists the identifier of every entity the CMS has ever sent, including those a consumer is not allowed to see."
           },
           "event": [

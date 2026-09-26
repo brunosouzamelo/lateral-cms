@@ -21,11 +21,13 @@ public class ReceiveCmsEventsCommandHandler(
     CmsPayloadSanitizer payloadSanitizer,
     ICmsEventProcessingSignal processingSignal,
     ICurrentUserService currentUserService,
+    ICorrelationContext correlationContext,
     IDateTimeService dateTimeService,
     ILogger<ReceiveCmsEventsCommandHandler> logger)
         : IRequestHandler<ReceiveCmsEventsCommand, IResult<CmsEventBatchReceiptDTO>>
 {
     private const int StatusReasonMaxLength = 2000;
+    private const int CorrelationIdMaxLength = 64;
 
     public async Task<IResult<CmsEventBatchReceiptDTO>> Handle(
         ReceiveCmsEventsCommand request,
@@ -49,9 +51,13 @@ public class ReceiveCmsEventsCommandHandler(
         var receivedDate = dateTimeService.UtcNowOffset;
         var receivedBy = currentUserService.CurrentUser.UserName ?? "unknown";
 
+        // Sanitized like any other value the caller controls: it is stored, returned and logged.
+        var correlationId = TextSanitizer.ForStorage(correlationContext.CorrelationId, CorrelationIdMaxLength);
+
         for (var index = 0; index < request.Events.Count; index++)
         {
-            var (cmsEvent, errors) = await BuildEventAsync(request.Events[index], index, receipt.BatchId, receivedDate, receivedBy, cancellationToken);
+            var (cmsEvent, errors) = await BuildEventAsync(
+                request.Events[index], index, receipt.BatchId, receivedDate, receivedBy, correlationId, cancellationToken);
 
             context.CmsEvent.Add(cmsEvent);
 
@@ -73,8 +79,8 @@ public class ReceiveCmsEventsCommandHandler(
             processingSignal.Notify();
 
         logger.LogInformation(
-            "CMS event batch {BatchId} received from {ReceivedBy}: {Received} events, {Accepted} accepted, {Rejected} rejected.",
-            receipt.BatchId, receivedBy, receipt.Received, receipt.Accepted, receipt.Rejected);
+            "CMS event batch {BatchId} received from {ReceivedBy}: {Received} events, {Accepted} accepted, {Rejected} rejected. Correlation: {CorrelationId}",
+            receipt.BatchId, receivedBy, receipt.Received, receipt.Accepted, receipt.Rejected, correlationId);
 
         return Result<CmsEventBatchReceiptDTO>.Success(receipt);
     }
@@ -85,6 +91,7 @@ public class ReceiveCmsEventsCommandHandler(
         Guid batchId,
         DateTimeOffset receivedDate,
         string receivedBy,
+        string? correlationId,
         CancellationToken cancellationToken)
     {
         var errors = new List<string>();
@@ -129,7 +136,8 @@ public class ReceiveCmsEventsCommandHandler(
             StatusReason = rejected ? TextSanitizer.ForStorage(string.Join(" | ", errors), StatusReasonMaxLength) : null,
             ProcessedDate = rejected ? receivedDate : null,
             ReceivedDate = receivedDate,
-            ReceivedBy = receivedBy
+            ReceivedBy = receivedBy,
+            CorrelationId = correlationId
         };
 
         return (cmsEvent, errors);

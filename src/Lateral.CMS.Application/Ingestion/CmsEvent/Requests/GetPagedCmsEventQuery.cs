@@ -26,4 +26,10 @@ public class GetPagedCmsEventQuery : PagingFilter, IRequest<IResult<PagingWithEn
     /// the CMS reported it, including the deliveries that changed nothing.
     /// </summary>
     public string? ExternalId { get; set; }
+
+    /// <summary>
+    /// Returns only the events that arrived under one correlation identifier, matched exactly. This is
+    /// what turns a trace in the CMS into the list of what this service did about it.
+    /// </summary>
+    public string? CorrelationId { get; set; }
 }

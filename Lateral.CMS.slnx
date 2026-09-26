@@ -11,6 +11,9 @@
     <Project Path="src/Lateral.CMS.Infrastructure.IoC/Lateral.CMS.Infrastructure.IoC.csproj" />
     <Project Path="src/Lateral.CMS.Infrastructure/Lateral.CMS.Infrastructure.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/Lateral.CMS.Simulator/Lateral.CMS.Simulator.csproj" />
+  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Lateral.CMS.UnitTests/Lateral.CMS.UnitTests.csproj" />
   </Folder>

@@ -36,4 +36,10 @@ public class CmsEvent
 
     public required DateTimeOffset ReceivedDate { get; set; }
     public required string ReceivedBy { get; set; }
+
+    /// <summary>
+    /// Ties the row to the delivery that brought it, and to the CMS's own trace when it sent one. Stored
+    /// rather than only logged, so the event log answers "what happened to that delivery" on its own.
+    /// </summary>
+    public string? CorrelationId { get; set; }
 }
