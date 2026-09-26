@@ -12,6 +12,7 @@
     { "key": "consumerPassword", "value": "ec12ccd4-e9dc-4cb3-bae6-e5f08a7a8359", "type": "string" },
     { "key": "adminUser", "value": "content-admin-root", "type": "string" },
     { "key": "adminPassword", "value": "226b714d-e4bf-4656-859b-67c0950e23ff", "type": "string" },
+    { "key": "invalidPassword", "value": "not-the-password", "type": "string" },
     { "key": "publishedId", "value": "", "type": "string" },
     { "key": "unpublishedId", "value": "", "type": "string" },
     { "key": "deletedId", "value": "", "type": "string" },
@@ -715,7 +716,7 @@
               "type": "basic",
               "basic": [
                 { "key": "username", "value": "{{consumerUser}}", "type": "string" },
-                { "key": "password", "value": "not-the-password", "type": "string" }
+                { "key": "password", "value": "{{invalidPassword}}", "type": "string" }
               ]
             },
             "method": "GET",
